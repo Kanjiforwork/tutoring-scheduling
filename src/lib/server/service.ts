@@ -1,3 +1,5 @@
+import { replaceBooking } from '../booking-replacement';
+import { editPolicyError } from '../edit-policy';
 import { monthBounds } from '../calendar';
 import { randomUUID } from 'node:crypto';
 import type { Sql, TransactionSql } from 'postgres';
@@ -79,7 +81,8 @@ export async function editSession(id:string,input:EditInput) {
   return locked(async tx=>{
     const all=await readSessions(tx);
     const before=current(all,id,input.expectedVersion);
-    if(!input.bookings && (before.bookings.every(b=>b.status==='cancelled') || before.bookings.some(b=>b.status==='no_show'))) throw new ScheduleError(409,'SESSION_NOT_EDITABLE','Fully cancelled sessions and sessions with a no-show cannot be rescheduled.');
+    const policyError = editPolicyError(before, input);
+    if (policyError) throw new ScheduleError(409, policyError.code, policyError.message);
     const options=await catalogs(tx);
     const tutor=options.tutors.find(t=>t.id===input.tutorId);
     if(!tutor || !options.rooms.some(r=>r.id===input.roomId)) throw new ScheduleError(404,'CATALOG_NOT_FOUND','The selected tutor or room does not exist.');
@@ -88,13 +91,19 @@ export async function editSession(id:string,input:EditInput) {
     if (edits && new Set(edits.map(b=>b.studentId)).size !== edits.length) throw new ScheduleError(400,'DUPLICATE_STUDENT','Choose different students for a pair.');
     if (edits?.some(b=>!options.students.some(s=>s.id===b.studentId))) throw new ScheduleError(404,'CATALOG_NOT_FOUND','A selected student no longer exists.');
     if (edits?.some(b=>before.bookings.some(old=>old.id!==b.id && old.studentId===b.studentId))) throw new ScheduleError(400,'BOOKING_IDENTITY','This student already has a booking in this session. Edit their existing booking instead.');
-    const bookings = edits ? edits.map(edit=>{
+    const replacements=edits?.filter(e=>e.replacementStudentId) ?? [];
+    const newStudents=[...(edits?.filter(e=>!e.id).map(e=>e.studentId) ?? []),...replacements.map(e=>e.replacementStudentId!)];
+    if (replacements.some(e=>!e.id || !before.bookings.some(b=>b.id===e.id) || e.replacementStudentId===e.studentId)) throw new ScheduleError(400,'INVALID_BOOKINGS','Choose a different student for an existing booking.');
+    if (new Set(newStudents).size!==newStudents.length || replacements.some(e=>before.bookings.some(b=>b.studentId===e.replacementStudentId))) throw new ScheduleError(400,'DUPLICATE_STUDENT','This student already has a booking here. Restore their existing booking instead.');
+    if (newStudents.some(id=>!options.students.some(s=>s.id===id))) throw new ScheduleError(404,'CATALOG_NOT_FOUND','A selected student no longer exists.');
+    const bookings = edits ? edits.flatMap(edit=>{
       const old=before.bookings.find(b=>b.id===edit.id);
+      if (old && edit.replacementStudentId) return replaceBooking(old, options.students.find(s=>s.id===edit.replacementStudentId)!, randomUUID(), DEMO_NOW, input.reason);
       return {...old,id:old?.id ?? randomUUID(),studentId:edit.studentId,studentName:options.students.find(s=>s.id===edit.studentId)!.name,status:edit.status,cancelledAt:edit.status==='cancelled' ? old?.cancelledAt ?? DEMO_NOW : null,reason:edit.status!==old?.status ? input.reason : old?.reason ?? null,sourceLessonId:old?.sourceLessonId ?? null,sourceNote:old?.sourceNote ?? null};
     }) : before.bookings;
     const mode=input.mode ?? before.mode;
     if (mode==='one_to_one' && bookings.filter(b=>b.status!=='cancelled').length>1) throw new ScheduleError(400,'SESSION_CAPACITY','Cancel one booking before switching to one-to-one.');
-    if (mode==='pair' && bookings.length!==2) throw new ScheduleError(400,'SESSION_CAPACITY','Select a second student for a pair session.');
+    if (mode==='pair' && (bookings.length<2 || bookings.filter(b=>b.status!=='cancelled').length>2)) throw new ScheduleError(400,'SESSION_CAPACITY','Select a second student for a pair session.');
     const after:Session={...before,date:input.date,startTime:input.startTime,durationMin:input.durationMin,tutorId:input.tutorId,tutorName:tutor.name,roomId:input.roomId,bookings,mode,note:input.note ?? before.note ?? '',version:before.version+1};
     // Cancellation alone must remain possible even on an invalid imported session.
     const cancellationOnly = ['date','startTime','durationMin','tutorId','roomId','mode'].every(key=>before[key as keyof Session]===after[key as keyof Session]) && after.bookings.every(b=>{const old=before.bookings.find(o=>o.id===b.id)!;return !!old && b.studentId===old.studentId && (b.status===old.status || b.status==='cancelled');});

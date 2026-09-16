@@ -107,7 +107,7 @@ suite('PostgreSQL schedule transactions (isolated retained fixtures)', () => {
     await cancelBooking(pair.bookings[1].id, { expectedVersion: 2, reason: 'Second family cancelled' });
     await expect(createSession({ ...f.input, studentIds: [f.students[2]] })).resolves.toMatchObject({ version: 1 });
     await expect(cancelBooking(pair.bookings[0].id, { expectedVersion: 3, reason: 'Repeated cancellation' })).rejects.toMatchObject({ code: 'ALREADY_CANCELLED' });
-    await expect(editSession(pair.id, edit(pair, { expectedVersion: 3 }))).rejects.toMatchObject({ code: 'SESSION_NOT_EDITABLE' });
+    await expect(editSession(pair.id, edit(pair, { expectedVersion: 3, startTime: '11:00', bookings: pair.bookings.map(b => ({id:b.id,studentId:b.studentId,status:'cancelled'})) }))).rejects.toMatchObject({ code: 'SESSION_NOT_EDITABLE' });
     const changes = (await getSchedule(date)).changes.filter((change) => change.sessionId === pair.id);
     expect(changes).toHaveLength(3);
     expect(changes.filter((change) => change.action === 'cancelled')).toHaveLength(2);
@@ -117,7 +117,7 @@ suite('PostgreSQL schedule transactions (isolated retained fixtures)', () => {
     const f = await fixtures();
     const historical = await rawSession(f.input, 'no_show');
     await expect(createSession({ ...f.input, studentIds: [f.students[1]] })).rejects.toMatchObject({ code: 'SCHEDULE_CONFLICT' });
-    await expect(editSession(historical.id, edit(historical, { startTime: '11:00' }))).rejects.toMatchObject({ code: 'SESSION_NOT_EDITABLE' });
+    await expect(editSession(historical.id, edit(historical, { startTime: '11:00', bookings: historical.bookings.map(b => ({id:b.id,studentId:b.studentId,status:b.status})) }))).rejects.toMatchObject({ code: 'SESSION_NOT_EDITABLE' });
   });
 
   it('rejects room-only edits while historical load is seven, but permits cancellation', async () => {
@@ -129,21 +129,39 @@ suite('PostgreSQL schedule transactions (isolated retained fixtures)', () => {
     await expect(editSession(historical[0].id, edit(historical[0], { roomId: f.otherRoomId }))).resolves.toMatchObject({ version: 2 });
   });
 
-  it('edits student and status atomically, and rejects conflicting restoration', async () => {
+  it('preserves student identity, edits status atomically, and rejects conflicting restoration', async () => {
     const f = await fixtures();
     const created = await createSession(f.input);
     let session = await find(created.id);
-    await editSession(session.id, edit(session, { bookings: [{ id: session.bookings[0].id, studentId: f.students[1], status: 'cancelled' }] }));
+    await expect(editSession(session.id, edit(session, { bookings: [{ id: session.bookings[0].id, studentId: f.students[1], status: 'cancelled' }] }))).rejects.toMatchObject({code:'BOOKING_IDENTITY'});
+    expect((await find(session.id)).version).toBe(1);
+    await editSession(session.id, edit(session, { bookings: [{ id: session.bookings[0].id, studentId: f.students[0], status: 'cancelled' }] }));
     session = await find(created.id);
-    expect(session.bookings[0]).toMatchObject({ studentId: f.students[1], status: 'cancelled' });
+    expect(session.bookings[0]).toMatchObject({ studentId: f.students[0], status: 'cancelled' });
     expect(session.bookings[0].cancelledAt).not.toBeNull();
     await createSession({ ...f.input, studentIds: [f.students[2]] });
-    await expect(editSession(session.id, edit(session, { bookings: [{ id: session.bookings[0].id, studentId: f.students[1], status: 'booked' }] }))).rejects.toMatchObject({ code: 'SCHEDULE_CONFLICT' });
+    await expect(editSession(session.id, edit(session, { bookings: [{ id: session.bookings[0].id, studentId: f.students[0], status: 'booked' }] }))).rejects.toMatchObject({ code: 'SCHEDULE_CONFLICT' });
     expect((await find(session.id)).version).toBe(2);
     const changes = (await getSchedule(date)).changes.filter(c => c.sessionId === session.id);
     expect(changes).toHaveLength(2);
     expect(changes[0].before?.bookings[0].studentId).toBe(f.students[0]);
-    expect(changes[0].after.bookings[0].studentId).toBe(f.students[1]);
+    expect(changes[0].after.bookings[0].studentId).toBe(f.students[0]);
+  });
+
+  it('keeps imported cancellation identity and history intact on rejected replacement', async () => {
+    const f=await fixtures();
+    const created=await createSession(f.input);
+    let session=await find(created.id);
+    await cancelBooking(session.bookings[0].id,{expectedVersion:1,reason:'tutor sick'});
+    const bookingId=session.bookings[0].id;
+    await db()`update bright_path_test.bookings set source_lesson_id=${`test-source-${randomUUID()}`},source_note='tutor sick' where id=${bookingId}`;
+    session=await find(created.id);
+    const history=(await getSchedule(date)).changes.filter(c=>c.sessionId===session.id);
+    await expect(editSession(session.id,edit(session,{bookings:[{id:bookingId,studentId:f.students[1],status:'cancelled'}]}))).rejects.toMatchObject({code:'BOOKING_IDENTITY'});
+    expect(await find(session.id)).toEqual(session);
+    expect((await getSchedule(date)).changes.filter(c=>c.sessionId===session.id)).toEqual(history);
+    await editSession(session.id,edit(session,{note:'Family informed',bookings:session.bookings.map(({id,studentId,status})=>({id,studentId,status}))}));
+    expect((await find(session.id)).bookings).toEqual(session.bookings);
   });
 
   it('allows cancellation through the editor on an invalid imported day', async () => {
@@ -167,6 +185,45 @@ suite('PostgreSQL schedule transactions (isolated retained fixtures)', () => {
     expect(session.bookings).toHaveLength(2);
     expect(session.bookings.filter(b=>b.status==='booked')).toHaveLength(1);
     expect(session.note).toBe('Bring workbook');
+  });
+
+  it('replaces a pair student twice without moving the session or changing the other student', async () => {
+    const f=await fixtures();
+    const created=await createSession({...f.input,mode:'pair',studentIds:f.students.slice(0,2)});
+    let session=await find(created.id);
+    const first=session.bookings.find(b=>b.studentId===f.students[0])!;
+    const peer=session.bookings.find(b=>b.studentId===f.students[1])!;
+    await db()`update bright_path_test.bookings set source_lesson_id=${`replacement-${randomUUID()}`},source_note='exam pair - half price' where id=${first.id}`;
+    session=await find(created.id);
+    const input=edit(session,{mode:'pair',bookings:session.bookings.map(b=>({id:b.id,studentId:b.studentId,status:b.status,...(b.id===first.id?{replacementStudentId:f.students[2]}:{})}))});
+    await editSession(session.id,input);
+    let saved=await find(session.id);
+    expect(saved.bookings.find(b=>b.id===first.id)).toMatchObject({status:'cancelled',studentId:f.students[0],sourceNote:'exam pair - half price'});
+    const fresh=saved.bookings.find(b=>b.studentId===f.students[2])!;
+    expect(fresh).toMatchObject({status:'booked',sourceLessonId:null,sourceNote:null,cancelledAt:null});
+    expect(fresh.id).not.toBe(first.id);
+    expect(saved.bookings.find(b=>b.id===peer.id)).toEqual(peer);
+    expect(saved).toMatchObject({date:session.date,startTime:session.startTime,tutorId:session.tutorId,roomId:session.roomId});
+    await expect(editSession(session.id,input)).rejects.toMatchObject({code:'STALE_VERSION'});
+    await editSession(saved.id,edit(saved,{mode:'pair',bookings:saved.bookings.map(b=>({id:b.id,studentId:b.studentId,status:b.status,...(b.id===fresh.id?{replacementStudentId:f.students[3]}:{})}))}));
+    saved=await find(saved.id);
+    expect(saved.bookings).toHaveLength(4);
+    expect(saved.bookings.filter(b=>b.status!=='cancelled').map(b=>b.studentId).sort()).toEqual([f.students[1],f.students[3]].sort());
+    expect((await getSchedule(date)).changes.filter(c=>c.sessionId===saved.id)).toHaveLength(3);
+    await editSession(saved.id,edit(saved,{note:'After replacement',bookings:saved.bookings.map(({id,studentId,status})=>({id,studentId,status}))}));
+    expect((await find(saved.id)).note).toBe('After replacement');
+  });
+
+  it('rolls back replacement when the incoming student is busy', async () => {
+    const f=await fixtures();
+    const other=await fixtures();
+    await createSession({...other.input,studentIds:[f.students[1]]});
+    const created=await createSession(f.input);
+    const session=await find(created.id);
+    const history=(await getSchedule(date)).changes.filter(c=>c.sessionId===session.id);
+    await expect(editSession(session.id,edit(session,{bookings:[{id:session.bookings[0].id,studentId:f.students[0],status:'booked',replacementStudentId:f.students[1]}]}))).rejects.toMatchObject({code:'SCHEDULE_CONFLICT'});
+    expect(await find(session.id)).toEqual(session);
+    expect((await getSchedule(date)).changes.filter(c=>c.sessionId===session.id)).toEqual(history);
   });
 
   it('shows move snapshots on both the old and new day', async () => {

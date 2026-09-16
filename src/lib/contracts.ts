@@ -10,7 +10,7 @@ export interface Warning { presentation?: ConflictPresentation; code: string; me
 export interface ScheduleChange { id: string; sessionId: string; action: 'created' | 'rescheduled' | 'cancelled'; before: Session | null; after: Session; occurredAt: string; reason: string | null; afterCutoff: boolean }
 export interface ScheduleData { date: string; sessions: Session[]; students: Student[]; tutors: Tutor[]; rooms: Room[]; warnings: Warning[]; changes: ScheduleChange[]; demoNow: string; timezone: string }
 export interface SessionInput { note?: string; date: string; startTime: string; durationMin: 60 | 90; tutorId: string; roomId: string; mode: SessionMode; studentIds: string[]; reason?: string }
-export interface BookingEdit { id?: string; studentId: string; status: BookingStatus }
+export interface BookingEdit { replacementStudentId?: string; id?: string; studentId: string; status: BookingStatus }
 export interface EditInput { note?: string; mode?: SessionMode; bookings?: BookingEdit[]; date: string; startTime: string; durationMin: 60 | 90; tutorId: string; roomId: string; expectedVersion: number; reason: string }
 export interface CancelInput { expectedVersion: number; reason: string }
 export interface ApiError { code: string; message: string; fieldErrors?: Record<string, string[]>; conflicts?: Warning[] }
