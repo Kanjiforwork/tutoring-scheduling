@@ -129,6 +129,46 @@ suite('PostgreSQL schedule transactions (isolated retained fixtures)', () => {
     await expect(editSession(historical[0].id, edit(historical[0], { roomId: f.otherRoomId }))).resolves.toMatchObject({ version: 2 });
   });
 
+  it('edits student and status atomically, and rejects conflicting restoration', async () => {
+    const f = await fixtures();
+    const created = await createSession(f.input);
+    let session = await find(created.id);
+    await editSession(session.id, edit(session, { bookings: [{ id: session.bookings[0].id, studentId: f.students[1], status: 'cancelled' }] }));
+    session = await find(created.id);
+    expect(session.bookings[0]).toMatchObject({ studentId: f.students[1], status: 'cancelled' });
+    expect(session.bookings[0].cancelledAt).not.toBeNull();
+    await createSession({ ...f.input, studentIds: [f.students[2]] });
+    await expect(editSession(session.id, edit(session, { bookings: [{ id: session.bookings[0].id, studentId: f.students[1], status: 'booked' }] }))).rejects.toMatchObject({ code: 'SCHEDULE_CONFLICT' });
+    expect((await find(session.id)).version).toBe(2);
+    const changes = (await getSchedule(date)).changes.filter(c => c.sessionId === session.id);
+    expect(changes).toHaveLength(2);
+    expect(changes[0].before?.bookings[0].studentId).toBe(f.students[0]);
+    expect(changes[0].after.bookings[0].studentId).toBe(f.students[1]);
+  });
+
+  it('allows cancellation through the editor on an invalid imported day', async () => {
+    const f = await fixtures();
+    const session = await rawSession({ ...f.input, date: '2026-03-09' });
+    await expect(editSession(session.id, edit(session, { bookings: session.bookings.map(b => ({ id: b.id, studentId: b.studentId, status: 'cancelled' })) }))).resolves.toMatchObject({ version: 2 });
+  });
+
+  it('converts one-to-one to pair, retains cancelled history, and persists notes', async () => {
+    const f = await fixtures();
+    const created = await createSession(f.input);
+    let session = await find(created.id);
+    await editSession(session.id, edit(session, {mode:'pair',note:'Bring workbook',bookings:[{id:session.bookings[0].id,studentId:f.students[0],status:'booked'},{studentId:f.students[1],status:'booked'}]}));
+    session=await find(created.id);
+    expect(session.mode).toBe('pair');
+    expect(session.note).toBe('Bring workbook');
+    expect(session.bookings).toHaveLength(2);
+    await expect(editSession(session.id,edit(session,{mode:'one_to_one',bookings:session.bookings.map(b=>({id:b.id,studentId:b.studentId,status:b.status}))}))).rejects.toMatchObject({code:'SESSION_CAPACITY'});
+    await editSession(session.id,edit(session,{mode:'one_to_one',bookings:session.bookings.map((b,i)=>({id:b.id,studentId:b.studentId,status:i===1?'cancelled':'booked'}))}));
+    session=await find(created.id);
+    expect(session.bookings).toHaveLength(2);
+    expect(session.bookings.filter(b=>b.status==='booked')).toHaveLength(1);
+    expect(session.note).toBe('Bring workbook');
+  });
+
   it('shows move snapshots on both the old and new day', async () => {
     const f = await fixtures();
     const created = await createSession(f.input);

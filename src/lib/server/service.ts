@@ -14,7 +14,7 @@ export async function readSessions(q: Query, date?: string, endDate?: string): P
   const rows = await q`select s.id, to_char(s.starts_at at time zone 'Asia/Ho_Chi_Minh','YYYY-MM-DD') as date,
     to_char(s.starts_at at time zone 'Asia/Ho_Chi_Minh','HH24:MI') as start_time,
     (extract(epoch from (s.ends_at-s.starts_at))/60)::int as duration_min,
-    s.tutor_id, t.name as tutor_name, s.room_id, s.mode, s.version,
+    s.tutor_id, t.name as tutor_name, s.room_id, s.mode, s.version, s.note,
     coalesce(jsonb_agg(jsonb_build_object('id',b.id,'studentId',b.student_id,'studentName',st.name,'status',b.status,
       'cancelledAt',b.cancelled_at,'reason',b.reason,'sourceLessonId',b.source_lesson_id,'sourceNote',b.source_note)
       order by b.id) filter (where b.id is not null),'[]'::jsonb) as bookings
@@ -22,7 +22,7 @@ export async function readSessions(q: Query, date?: string, endDate?: string): P
     left join ${table(q,'bookings')} b on b.session_id=s.id left join ${table(q,'students')} st on st.id=b.student_id
     where ${date && endDate ? q`s.starts_at >= ${date + 'T00:00:00+07:00'}::timestamptz and s.starts_at < ${endDate + 'T00:00:00+07:00'}::timestamptz` : date ? q`(s.starts_at at time zone 'Asia/Ho_Chi_Minh')::date = ${date}::date` : q`true`}
     group by s.id,t.name order by s.starts_at,s.id`;
-  return rows.map(r=>({id:r.id,date:r.date,startTime:r.start_time,durationMin:r.duration_min,tutorId:r.tutor_id,tutorName:r.tutor_name,roomId:r.room_id,mode:r.mode,version:r.version,bookings:r.bookings}));
+  return rows.map(r=>({id:r.id,date:r.date,startTime:r.start_time,durationMin:r.duration_min,tutorId:r.tutor_id,tutorName:r.tutor_name,roomId:r.room_id,mode:r.mode,note:r.note,version:r.version,bookings:r.bookings}));
 }
 async function catalogs(q: Query) {
   const students = await q<Student[]>`select id,name from ${table(q,'students')} order by name`;
@@ -66,10 +66,10 @@ export async function createSession(input:SessionInput) {
     const options=await catalogs(tx);
     const tutor=options.tutors.find(t=>t.id===input.tutorId);
     if(!tutor || !options.rooms.some(r=>r.id===input.roomId) || input.studentIds.some(id=>!options.students.some(s=>s.id===id))) throw new ScheduleError(404,'CATALOG_NOT_FOUND','A selected student, tutor or room does not exist.');
-    const candidate:Session={id:randomUUID(),date:input.date,startTime:input.startTime,durationMin:input.durationMin,tutorId:input.tutorId,tutorName:tutor.name,roomId:input.roomId,mode:input.mode,version:1,bookings:input.studentIds.map(id=>({id:randomUUID(),studentId:id,studentName:options.students.find(s=>s.id===id)!.name,status:'booked',cancelledAt:null,reason:null,sourceLessonId:null,sourceNote:null}))};
+    const candidate:Session={id:randomUUID(),date:input.date,startTime:input.startTime,durationMin:input.durationMin,tutorId:input.tutorId,tutorName:tutor.name,roomId:input.roomId,mode:input.mode,note:input.note ?? '',version:1,bookings:input.studentIds.map(id=>({id:randomUUID(),studentId:id,studentName:options.students.find(s=>s.id===id)!.name,status:'booked',cancelledAt:null,reason:null,sourceLessonId:null,sourceNote:null}))};
     validCandidate(candidate,await readSessions(tx,input.date));
-    await tx`insert into ${table(tx,'sessions')} (id,starts_at,ends_at,tutor_id,room_id,mode,version)
-      values (${candidate.id},${instant(candidate)}::timestamptz,${instant(candidate)}::timestamptz + ${candidate.durationMin} * interval '1 minute',${candidate.tutorId},${candidate.roomId},${candidate.mode},1)`;
+    await tx`insert into ${table(tx,'sessions')} (id,starts_at,ends_at,tutor_id,room_id,mode,version,note)
+      values (${candidate.id},${instant(candidate)}::timestamptz,${instant(candidate)}::timestamptz + ${candidate.durationMin} * interval '1 minute',${candidate.tutorId},${candidate.roomId},${candidate.mode},1,${candidate.note ?? ''})`;
     for(const b of candidate.bookings) await tx`insert into ${table(tx,'bookings')} (id,session_id,student_id,status) values (${b.id},${candidate.id},${b.studentId},'booked')`;
     await audit(tx,'created',null,candidate,input.reason);
     return {id:candidate.id,version:1};
@@ -79,13 +79,31 @@ export async function editSession(id:string,input:EditInput) {
   return locked(async tx=>{
     const all=await readSessions(tx);
     const before=current(all,id,input.expectedVersion);
-    if(before.bookings.every(b=>b.status==='cancelled') || before.bookings.some(b=>b.status==='no_show')) throw new ScheduleError(409,'SESSION_NOT_EDITABLE','Fully cancelled sessions and sessions with a no-show cannot be rescheduled.');
+    if(!input.bookings && (before.bookings.every(b=>b.status==='cancelled') || before.bookings.some(b=>b.status==='no_show'))) throw new ScheduleError(409,'SESSION_NOT_EDITABLE','Fully cancelled sessions and sessions with a no-show cannot be rescheduled.');
     const options=await catalogs(tx);
     const tutor=options.tutors.find(t=>t.id===input.tutorId);
     if(!tutor || !options.rooms.some(r=>r.id===input.roomId)) throw new ScheduleError(404,'CATALOG_NOT_FOUND','The selected tutor or room does not exist.');
-    const after:Session={...before,date:input.date,startTime:input.startTime,durationMin:input.durationMin,tutorId:input.tutorId,tutorName:tutor.name,roomId:input.roomId,version:before.version+1};
-    validCandidate(after,all);
-    await tx`update ${table(tx,'sessions')} set starts_at=${instant(after)}::timestamptz,ends_at=${instant(after)}::timestamptz + ${after.durationMin} * interval '1 minute', tutor_id=${after.tutorId},room_id=${after.roomId},version=${after.version} where id=${id}`;
+    const edits = input.bookings;
+    if (edits && (new Set(edits.filter(b=>b.id).map(b=>b.id)).size !== edits.filter(b=>b.id).length || before.bookings.some(b=>!edits.some(e=>e.id===b.id)) || edits.some(b=>b.id && !before.bookings.some(old=>old.id===b.id)))) throw new ScheduleError(400,'INVALID_BOOKINGS','Existing bookings must be retained. Cancel a booking instead of removing its history.');
+    if (edits && new Set(edits.map(b=>b.studentId)).size !== edits.length) throw new ScheduleError(400,'DUPLICATE_STUDENT','Choose different students for a pair.');
+    if (edits?.some(b=>!options.students.some(s=>s.id===b.studentId))) throw new ScheduleError(404,'CATALOG_NOT_FOUND','A selected student no longer exists.');
+    if (edits?.some(b=>before.bookings.some(old=>old.id!==b.id && old.studentId===b.studentId))) throw new ScheduleError(400,'BOOKING_IDENTITY','This student already has a booking in this session. Edit their existing booking instead.');
+    const bookings = edits ? edits.map(edit=>{
+      const old=before.bookings.find(b=>b.id===edit.id);
+      return {...old,id:old?.id ?? randomUUID(),studentId:edit.studentId,studentName:options.students.find(s=>s.id===edit.studentId)!.name,status:edit.status,cancelledAt:edit.status==='cancelled' ? old?.cancelledAt ?? DEMO_NOW : null,reason:edit.status!==old?.status ? input.reason : old?.reason ?? null,sourceLessonId:old?.sourceLessonId ?? null,sourceNote:old?.sourceNote ?? null};
+    }) : before.bookings;
+    const mode=input.mode ?? before.mode;
+    if (mode==='one_to_one' && bookings.filter(b=>b.status!=='cancelled').length>1) throw new ScheduleError(400,'SESSION_CAPACITY','Cancel one booking before switching to one-to-one.');
+    if (mode==='pair' && bookings.length!==2) throw new ScheduleError(400,'SESSION_CAPACITY','Select a second student for a pair session.');
+    const after:Session={...before,date:input.date,startTime:input.startTime,durationMin:input.durationMin,tutorId:input.tutorId,tutorName:tutor.name,roomId:input.roomId,bookings,mode,note:input.note ?? before.note ?? '',version:before.version+1};
+    // Cancellation alone must remain possible even on an invalid imported session.
+    const cancellationOnly = ['date','startTime','durationMin','tutorId','roomId','mode'].every(key=>before[key as keyof Session]===after[key as keyof Session]) && after.bookings.every(b=>{const old=before.bookings.find(o=>o.id===b.id)!;return !!old && b.studentId===old.studentId && (b.status===old.status || b.status==='cancelled');});
+    if (!cancellationOnly) validCandidate(after,all);
+    for(const b of after.bookings) {
+      if(before.bookings.some(old=>old.id===b.id)) await tx`update ${table(tx,'bookings')} set student_id=${b.studentId},status=${b.status},cancelled_at=${b.cancelledAt},reason=${b.reason} where id=${b.id}`;
+      else await tx`insert into ${table(tx,'bookings')} (id,session_id,student_id,status,cancelled_at,reason) values (${b.id},${id},${b.studentId},${b.status},${b.cancelledAt},${b.reason})`;
+    }
+    await tx`update ${table(tx,'sessions')} set starts_at=${instant(after)}::timestamptz,ends_at=${instant(after)}::timestamptz + ${after.durationMin} * interval '1 minute', tutor_id=${after.tutorId},room_id=${after.roomId},mode=${after.mode},note=${after.note ?? ''},version=${after.version} where id=${id}`;
     await audit(tx,'rescheduled',before,after,input.reason);
     return {id,version:after.version};
   });

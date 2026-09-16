@@ -31,3 +31,6 @@ create index if not exists bookings_student_idx on __SCHEMA__.bookings(student_i
 create index if not exists changes_session_idx on __SCHEMA__.schedule_changes(session_id);
 create index if not exists changes_booking_idx on __SCHEMA__.schedule_changes(booking_id);
 revoke all on all tables in schema __SCHEMA__ from public, anon, authenticated;
+
+-- Reception notes are editable; source notes remain unchanged.
+alter table __SCHEMA__.sessions add column if not exists note text not null default '';
