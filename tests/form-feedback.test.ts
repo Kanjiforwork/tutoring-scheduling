@@ -43,3 +43,21 @@ describe('session form feedback', () => {
     expect(savedWarning.message).toContain('Pham Duc has 8');
   });
 });
+
+it('returns structured conflict details across the API JSON boundary', () => {
+  const stored = session('existing', 9);
+  const draft = session('draft', 9);
+  draft.bookings[0].studentId = stored.bookings[0].studentId;
+  const conflicts = JSON.parse(JSON.stringify(validateSession(draft, [stored])));
+  expect(conflicts.map((w: { code: string }) => w.code)).toEqual(expect.arrayContaining(['ROOM_OVERLAP', 'TUTOR_OVERLAP', 'STUDENT_OVERLAP']));
+  for (const warning of conflicts) {
+    expect(warning.presentation.slots).toHaveLength(2);
+    expect(warning.presentation.slots.filter((slot: { draft: boolean }) => slot.draft)).toHaveLength(1);
+    expect(warning.presentation.slots[0]).toMatchObject({ date: '2026-03-04', startTime: '09:00', durationMin: 60, room: 'R2' });
+    expect(warning.presentation.title).not.toContain('existing');
+  }
+});
+it('keeps saved conflict slots separate from proposed changes', () => {
+  const warning = detectWarnings([session('one'), session('two')])[0];
+  expect(warning.presentation?.slots.every(slot => !slot.draft)).toBe(true);
+});

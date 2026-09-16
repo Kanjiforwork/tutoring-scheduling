@@ -1,3 +1,4 @@
+import { presentConflict } from './conflict-presentation';
 import { POLICY, type Booking, type Session, type Warning } from './contracts';
 
 /** Strict calendar validation prevents Date from silently rolling February 30 into March. */
@@ -96,7 +97,7 @@ export function detectWarnings(sessions: Session[], candidateId?: string): Warni
       warnings.push(warning('TUTOR_DAILY_LIMIT', `${candidateId && group.some(s => s.id === candidateId) ? 'This change would give ' + group[0].tutorName : group[0].tutorName + ' has'} ${count} active student bookings on ${group[0].date}; the limit is ${POLICY.maxBookings}. A pair counts as two. Changing only the room will not resolve this; change tutor/day or reduce the total by at least ${count - POLICY.maxBookings} booking${count - POLICY.maxBookings === 1 ? '' : 's'}.`, group));
     }
   }
-  return warnings;
+  return warnings.map(item => ({ ...item, presentation: presentConflict(item, sessions, candidateId) }));
 }
 
 /** Validate only the affected session; unrelated historical violations must not block a write. */
