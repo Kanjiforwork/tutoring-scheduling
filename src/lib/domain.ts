@@ -20,9 +20,8 @@ function minutes(value: string): number {
   return hours * 60 + mins;
 }
 
-function label(session: Session): string {
-  const sourceIds = activeBookings(session).flatMap((booking) => booking.sourceLessonId ? [booking.sourceLessonId] : []);
-  return `${sourceIds.length ? sourceIds.join('/') : session.id} (${session.date} ${session.startTime}, ${session.roomId})`;
+function label(session: Session, candidateId?: string): string {
+  return `${session.id === candidateId ? 'This session' : activeBookings(session).map(b => b.studentName).join(' & ')} (${session.date} ${session.startTime}, ${session.roomId})`;
 }
 
 function warning(code: string, message: string, sessions: Session[], bookings = sessions.flatMap(activeBookings)): Warning {
@@ -36,7 +35,7 @@ function warning(code: string, message: string, sessions: Session[], bookings = 
 }
 
 /** Reads never repair historical data. Cancelled-only sessions no longer consume resources. */
-export function detectWarnings(sessions: Session[]): Warning[] {
+export function detectWarnings(sessions: Session[], candidateId?: string): Warning[] {
   const warnings: Warning[] = [];
   const active = sessions.filter((session) => activeBookings(session).length > 0);
   const validIntervals: Session[] = [];
@@ -49,12 +48,12 @@ export function detectWarnings(sessions: Session[]): Warning[] {
       warnings.push(warning('INVALID_DURATION', `Sessions must last ${POLICY.durations.join(' or ')} minutes.`, [session]));
     }
     if (validDate && new Date(`${session.date}T00:00:00Z`).getUTCDay() === POLICY.closedWeekday) {
-      warnings.push(warning('CLOSED_DAY', `${label(session)} is on Monday, when the centre is closed. Choose Tuesday–Sunday.`, [session]));
+      warnings.push(warning('CLOSED_DAY', `${label(session, candidateId)} is on Monday, when the centre is closed. Choose Tuesday–Sunday.`, [session]));
     }
     if (validTime && Number.isFinite(session.durationMin) && session.durationMin > 0) {
       const start = minutes(session.startTime);
       if (start < minutes(POLICY.opensAt) || start + session.durationMin > minutes(POLICY.closesAt)) {
-        warnings.push(warning('OUTSIDE_HOURS', `${label(session)} must fit entirely within ${POLICY.opensAt}–${POLICY.closesAt}.`, [session]));
+        warnings.push(warning('OUTSIDE_HOURS', `${label(session, candidateId)} must fit entirely within ${POLICY.opensAt}–${POLICY.closesAt}.`, [session]));
       }
       if (validDate) validIntervals.push(session);
     }
@@ -68,7 +67,7 @@ export function detectWarnings(sessions: Session[]): Warning[] {
       const leftStart = minutes(left.startTime);
       const rightStart = minutes(right.startTime);
       if (leftStart >= rightStart + right.durationMin || rightStart >= leftStart + left.durationMin) continue;
-      const records = `${label(left)} and ${label(right)}`;
+      const records = `${label(left, candidateId)} and ${label(right, candidateId)}`;
       if (left.tutorId === right.tutorId) {
         warnings.push(warning('TUTOR_OVERLAP', `${left.tutorName} is assigned to overlapping sessions: ${records}. Choose another tutor or time.`, [left, right]));
       }
@@ -94,7 +93,7 @@ export function detectWarnings(sessions: Session[]): Warning[] {
   for (const group of tutorDays.values()) {
     const count = group.reduce((total, session) => total + activeBookings(session).length, 0);
     if (count > POLICY.maxBookings) {
-      warnings.push(warning('TUTOR_DAILY_LIMIT', `${group[0].tutorName} has ${count} active student bookings on ${group[0].date}; the limit is ${POLICY.maxBookings}. A pair counts as two. Changing only the room will not resolve this; change tutor/day or cancel a booking.`, group));
+      warnings.push(warning('TUTOR_DAILY_LIMIT', `${candidateId && group.some(s => s.id === candidateId) ? 'This change would give ' + group[0].tutorName : group[0].tutorName + ' has'} ${count} active student bookings on ${group[0].date}; the limit is ${POLICY.maxBookings}. A pair counts as two. Changing only the room will not resolve this; change tutor/day or reduce the total by at least ${count - POLICY.maxBookings} booking${count - POLICY.maxBookings === 1 ? '' : 's'}.`, group));
     }
   }
   return warnings;
@@ -103,7 +102,7 @@ export function detectWarnings(sessions: Session[]): Warning[] {
 /** Validate only the affected session; unrelated historical violations must not block a write. */
 export function validateSession(candidate: Session, otherSessions: Session[]): Warning[] {
   // Excluding by identity is defensive: callers normally already exclude the old representation.
-  return detectWarnings([...otherSessions.filter((session) => session.id !== candidate.id), candidate])
+  return detectWarnings([...otherSessions.filter((session) => session.id !== candidate.id), candidate], candidate.id)
     .filter((item) => item.sessionIds.includes(candidate.id));
 }
 
