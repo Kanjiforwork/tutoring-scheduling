@@ -65,6 +65,8 @@ Subagents must not modify contracts, dependencies, migrations, or Git history. U
 
 ## Communication and handoff
 
+Do not create, write, or edit `DECISIONS.md` unless Bao explicitly requests work on that file. General implementation, documentation, handoff, or commit requests do not authorize writing it. This restriction takes precedence over any broader documentation responsibilities in this file.
+
 Explain why significant architecture or behavior choices are needed. Before acceptance, make the create and cancellation flows understandable from user action through API, transaction, database, and rendered result, including their main failure cases. Record real AI contributions and an actual rejected suggestion; do not fabricate reflection evidence.
 
 The assessment allows 150 minutes total, including reading and planning. Track actual time and reduce scope rather than inventing a fresh time budget. Keep personal machine/workflow preferences outside shared repository policy unless explicitly requested.
