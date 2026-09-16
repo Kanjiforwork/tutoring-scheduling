@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Plus, X, CalendarDays, RefreshCw, AlertTriangle, History, Users, Check, ChevronDown, SlidersHorizontal, Pencil, ArrowUpRight, MoreHorizontal } from 'lucide-react';
+import { currentBookings } from '@/lib/booking-replacement';
+import { scheduleLocked } from '@/lib/edit-policy';
 import { SessionSelect } from './session-select';
 import { pickAvailability } from '@/lib/pick-availability';
 import { isValidDate, isValidTime } from '@/lib/domain';
@@ -30,10 +32,10 @@ function ConflictItems({ warnings, sessions = [] }: { warnings: Warning[]; sessi
     if (existing) existing.item = { ...existing.item, slots: [...existing.item.slots, ...item.slots].filter((slot,i,all) => all.findIndex(other => JSON.stringify(other) === JSON.stringify(slot)) === i) };
     else groups.set(key, { code: warning.code, item: { ...item, slots: [...item.slots] } });
   }
-  return <div className="conflict-grid">{[...groups].map(([key,{code,item}]) => {
-    const category = code === 'STUDENT_OVERLAP' ? 'Student' : code === 'TUTOR_OVERLAP' || code === 'TUTOR_DAILY_LIMIT' ? 'Tutor' : code === 'ROOM_OVERLAP' ? 'Room' : 'Schedule';
-    return <section className="conflict-card" key={key}><span className="conflict-category">{category}</span><p className="conflict-title"><strong>{item.title}</strong></p>{item.action && <p className="conflict-action">{item.action}</p>}{item.slots.length > 0 && <details className="conflict-slot-details"><summary>View conflicting lessons<ChevronDown size={12} aria-hidden="true" /></summary><div className="conflict-sessions">{item.slots.map((slot,i) => <div className="conflict-session" key={i}><span>{shortDate(slot.date)}</span><strong>{slot.startTime}–{endTime(slot)}</strong><span>Room {slot.room}{slot.draft && <small className="conflict-draft"> · This change</small>}</span></div>)}</div></details>}</section>;
-  })}</div>;
+  return <div className="conflict-grid">{[...groups].map(([key,{item}]) => <details className="conflict-row" key={key}>
+    <summary><span>{item.title}</span><ChevronDown size={14} aria-hidden="true" /></summary>
+    <div className="conflict-row-body">{item.action && <p>{item.action}</p>}{item.slots.length > 0 && <div className="conflict-lesson-list">{item.slots.map((slot,i) => <div className="conflict-lesson" key={i}><span>{shortDate(slot.date)}</span><strong>{slot.startTime}–{endTime(slot)}</strong><span>Room {slot.room}{slot.draft && ' · This change'}</span></div>)}</div>}</div>
+  </details>)}</div>;
 }
 function Warnings({ warnings, prominent = false, sessions = [] }: { warnings: Warning[]; prominent?: boolean; sessions?: Session[] }) {
   if (!warnings.length) return null;
@@ -72,13 +74,13 @@ export function SchedulingBoard() {
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [date, data]);
   const saved = async () => { setEditor(null); setCancelling(null); setNotice('Changes saved.'); invalidateSchedule(); setCalendarRevision(value => value + 1); if (!(await reload())) setNotice('Saved successfully, but the schedule could not refresh. Reload before making another change.'); };
-  const visible = data?.sessions.filter(s => (!tutor || s.tutorId === tutor) && (!student || s.bookings.some(b => b.studentId === student))) ?? [];
+  const visible = data?.sessions.filter(s => (!tutor || s.tutorId === tutor) && (!student || currentBookings(s).some(b => b.studentId === student))) ?? [];
   const issues = data?.warnings.length ?? 0;
   const activeCount = data?.sessions.reduce((count, s) => count + s.bookings.filter(b => b.status !== 'cancelled').length, 0) ?? 0;
   const canWrite = !!data && !loading && !loadError;
   const cell = (s: Session, field: EditField, label: string, children: ReactNode) => <button type="button" className="cell-edit" disabled={!canWrite} aria-label={label} onClick={() => setEditor({ session: s, field })}>{children}</button>;
   const editButton = (s: Session) => <button className="button ghost edit-button" disabled={!canWrite} onClick={() => setEditor({ session: s })}><Pencil size={14} />Edit</button>;
-  const students = (s: Session, mobile = false) => <div className="students">{s.mode === 'pair' && <span className="badge pair"><Users size={12} />Pair session</span>}{s.bookings.map(b => <div className="student-entry" key={b.id}><div className="student-name">{cell(s, `student-${b.id}`, `Edit student ${b.studentName}`, b.studentName)}{s.bookings.length > 1 && (mobile || s.bookings.some(booking => booking.status !== s.bookings[0].status)) && cell(s, `status-${b.id}`, `Edit status for ${b.studentName}`, <Status status={b.status} />)}</div></div>)}</div>;
+  const students = (s: Session, mobile = false) => <div className="students">{s.mode === 'pair' && <span className="badge pair"><Users size={12} />Pair session</span>}{currentBookings(s).map(b => <div className="student-entry" key={b.id}><div className="student-name">{cell(s, `student-${b.id}`, `Edit student ${b.studentName}`, b.studentName)}{currentBookings(s).length > 1 && (mobile || currentBookings(s).some(booking => booking.status !== currentBookings(s)[0].status)) && cell(s, `status-${b.id}`, `Edit status for ${b.studentName}`, <Status status={b.status} />)}</div></div>)}</div>;
   const actions = (s: Session) => <div className="row-actions">{editButton(s)}<SessionActions session={s} canWrite={canWrite} onDetails={() => setDetailsSession(s)} onCancel={b => setCancelling({ session: s, booking: b })} /></div>;
   const warnings = (s: Session) => { const count = data?.warnings.filter(w => w.sessionIds.includes(s.id)).length ?? 0; return count > 0 ? <button className="row-warning" aria-label={`View ${count} scheduling issues`} onClick={() => setDetailsSession(s)}><AlertTriangle size={15} /><span>{count}</span></button> : null; };
 
@@ -94,13 +96,13 @@ export function SchedulingBoard() {
         {view === 'week' && <>
         <WeekStrip date={date} onSelect={setDate} />
         {!loadError && data && issues > 0 && <div className="issues-banner"><AlertTriangle size={17} /><span><strong>{issues} scheduling {issues === 1 ? 'issue' : 'issues'}</strong></span></div>}
-        {loading && !data ? <div className="empty-state" role="status"><RefreshCw className="spin" size={24} /><h2>Loading schedule…</h2></div> : !loadError && !visible.length ? <div className="empty-state"><CalendarDays size={30} /><h2>{tutor || student ? 'No matching sessions' : 'No sessions scheduled'}</h2>{(tutor || student) && <p>Try another filter.</p>}{!(tutor || student) && <button className="button primary" disabled={!canWrite} onClick={() => setEditor({})}><Plus size={16} />Add the first session</button>}</div> : data && <><div className="table-wrap"><table><thead><tr><th>Time</th><th>Students</th><th>Tutor</th><th>Room</th><th>Status</th><th className="issues-column"><span className="sr-only">Warnings</span></th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{visible.map(s => <tr key={s.id}><td className="time-cell">{cell(s, 'startTime', `Edit time for ${s.bookings.map(b => b.studentName).join(' and ')}`, <strong>{s.startTime}–{endTime(s)}</strong>)}{cell(s, 'durationMin', 'Edit duration', <small>{s.durationMin} min</small>)}</td><td>{students(s)}</td><td>{cell(s, 'tutorId', `Edit tutor ${s.tutorName}`, <><span className="tutor-name">{s.tutorName}</span><small>{data.tutors.find(t => t.id === s.tutorId)?.subject}</small></>)}</td><td>{cell(s, 'roomId', `Edit room ${s.roomId}`, <span className="room-label">{s.roomId}</span>)}</td><td>{cell(s, `status-${s.bookings[0].id}`, 'Edit booking statuses', s.bookings.length > 1 ? <span className="pair-summary">{s.bookings.filter(b => b.status === 'booked').length} booked{s.bookings.some(b => b.status === 'cancelled') && <small>{s.bookings.filter(b => b.status === 'cancelled').length} cancelled</small>}{s.bookings.some(b => b.status === 'no_show') && <small>{s.bookings.filter(b => b.status === 'no_show').length} no-show</small>}</span> : <Status status={s.bookings[0]?.status ?? 'cancelled'} />)}</td><td className="issues-column">{warnings(s)}</td><td>{actions(s)}</td></tr>)}</tbody></table></div><div className="mobile-sessions">{visible.map(s => <article className="mobile-session" key={s.id}><div className="mobile-session-top">{cell(s, 'startTime', 'Edit session time', <strong>{s.startTime}–{endTime(s)}<small>{s.durationMin} min</small></strong>)}{s.bookings.length === 1 && cell(s, `status-${s.bookings[0].id}`, 'Edit booking status', <Status status={s.bookings[0]?.status ?? 'cancelled'} />)}</div>{students(s, true)}<div className="mobile-resources">{cell(s, 'tutorId', `Edit tutor ${s.tutorName}`, <span><small>Tutor</small>{s.tutorName}</span>)}{cell(s, 'roomId', `Edit room ${s.roomId}`, <span><small>Room</small>{s.roomId}</span>)}</div><div className="mobile-session-bottom">{warnings(s)}{actions(s)}</div></article>)}</div></>}
+        {loading && !data ? <div className="empty-state" role="status"><RefreshCw className="spin" size={24} /><h2>Loading schedule…</h2></div> : !loadError && !visible.length ? <div className="empty-state"><CalendarDays size={30} /><h2>{tutor || student ? 'No matching sessions' : 'No sessions scheduled'}</h2>{(tutor || student) && <p>Try another filter.</p>}{!(tutor || student) && <button className="button primary" disabled={!canWrite} onClick={() => setEditor({})}><Plus size={16} />Add the first session</button>}</div> : data && <><div className="table-wrap"><table><thead><tr><th>Time</th><th>Students</th><th>Tutor</th><th>Room</th><th>Status</th><th className="issues-column"><span className="sr-only">Warnings</span></th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{visible.map(s => <tr key={s.id}><td className="time-cell">{cell(s, 'startTime', `Edit time for ${currentBookings(s).map(b => b.studentName).join(' and ')}`, <strong>{s.startTime}–{endTime(s)}</strong>)}{cell(s, 'durationMin', 'Edit duration', <small>{s.durationMin} min</small>)}</td><td>{students(s)}</td><td>{cell(s, 'tutorId', `Edit tutor ${s.tutorName}`, <><span className="tutor-name">{s.tutorName}</span><small>{data.tutors.find(t => t.id === s.tutorId)?.subject}</small></>)}</td><td>{cell(s, 'roomId', `Edit room ${s.roomId}`, <span className="room-label">{s.roomId}</span>)}</td><td>{cell(s, `status-${currentBookings(s)[0].id}`, 'Edit booking statuses', currentBookings(s).length > 1 ? <span className="pair-summary">{currentBookings(s).filter(b => b.status === 'booked').length} booked{currentBookings(s).some(b => b.status === 'cancelled') && <small>{currentBookings(s).filter(b => b.status === 'cancelled').length} cancelled</small>}{currentBookings(s).some(b => b.status === 'no_show') && <small>{currentBookings(s).filter(b => b.status === 'no_show').length} no-show</small>}</span> : <Status status={currentBookings(s)[0]?.status ?? 'cancelled'} />)}</td><td className="issues-column">{warnings(s)}</td><td>{actions(s)}</td></tr>)}</tbody></table></div><div className="mobile-sessions">{visible.map(s => <article className="mobile-session" key={s.id}><div className="mobile-session-top">{cell(s, 'startTime', 'Edit session time', <strong>{s.startTime}–{endTime(s)}<small>{s.durationMin} min</small></strong>)}{currentBookings(s).length === 1 && cell(s, `status-${currentBookings(s)[0].id}`, 'Edit booking status', <Status status={currentBookings(s)[0]?.status ?? 'cancelled'} />)}</div>{students(s, true)}<div className="mobile-resources">{cell(s, 'tutorId', `Edit tutor ${s.tutorName}`, <span><small>Tutor</small>{s.tutorName}</span>)}{cell(s, 'roomId', `Edit room ${s.roomId}`, <span><small>Room</small>{s.roomId}</span>)}</div><div className="mobile-session-bottom">{warnings(s)}{actions(s)}</div></article>)}</div></>}
         </>}
         </div>
         </section>
       {view === 'week' && <details className="history-panel"><summary><span><History size={18} /><strong>Changes for this day</strong><span className="count-badge">{data?.changes.length ?? 0}</span></span><ChevronDown size={18} /></summary><div className="history-body">{data?.changes.length ? data.changes.map(c => <Change key={c.id} change={c} date={date} />) : <p className="history-empty">No changes recorded.</p>}</div></details>}
       
-    </main>{detailsSession && <Dialog title="Session details" busy={false} onClose={() => setDetailsSession(null)}><div className="modal-body session-details-body"><Snapshot session={detailsSession} />{data?.warnings.some(w => w.sessionIds.includes(detailsSession.id)) && <Warnings warnings={data.warnings.filter(w => w.sessionIds.includes(detailsSession.id))} sessions={data.sessions} prominent />}{detailsSession.bookings.map(b => <section className="booking-detail-section" key={b.id}><div className="booking-detail-heading"><strong>{b.studentName}</strong><Status status={b.status} /></div>{b.sourceNote && <p>{b.sourceNote}</p>}{b.cancelledAt && <p>Cancelled: {new Date(b.cancelledAt).toLocaleString('en-GB', { timeZone: TIMEZONE })}</p>}{b.reason && <p>Reason: {b.reason}</p>}</section>)}</div></Dialog>}{editor && data && <SessionDialog key={editor.session?.id ?? `new-${date}`} data={data} date={date} session={editor.session} initialField={editor.field} onClose={() => setEditor(null)} onSaved={saved} onReload={reload} />}{cancelling && <CancelDialog {...cancelling} onClose={() => setCancelling(null)} onSaved={saved} onReload={reload} />}</>;
+    </main>{detailsSession && <SessionDetails session={detailsSession} data={data ?? undefined} canEdit={canWrite} onClose={() => setDetailsSession(null)} onEdit={() => { setEditor({session:detailsSession}); setDetailsSession(null); }} />}{editor && data && <SessionDialog key={editor.session?.id ?? `new-${date}`} data={data} date={date} session={editor.session} initialField={editor.field} onClose={() => setEditor(null)} onSaved={saved} onReload={reload} />}{cancelling && <CancelDialog {...cancelling} onClose={() => setCancelling(null)} onSaved={saved} onReload={reload} />}</>;
 }
 
 function SessionActions({ session, canWrite, onDetails, onCancel }: { session: Session; canWrite: boolean; onDetails: () => void; onCancel: (booking: Booking) => void }) {
@@ -121,6 +123,41 @@ function Dialog({ title, children, onClose, busy, initialField }: { title: strin
   useEffect(() => { const dialog = ref.current; const trigger = document.activeElement as HTMLElement | null; dialog?.showModal(); if (initialField) dialog?.querySelector<HTMLElement>(`[data-edit-field="${initialField}"]`)?.focus(); return () => { dialog?.close(); trigger?.focus(); }; }, [initialField]);
   return <dialog ref={ref} className="modal" onCancel={e => { e.preventDefault(); if (!busy) onClose(); }} aria-labelledby={titleId}><div className="modal-header"><div><h2 id={titleId}>{title}</h2></div><button className="button icon" disabled={busy} aria-label="Close dialog" onClick={onClose}><X size={19} /></button></div>{children}</dialog>;
 }
+function SessionDetails({ session, data, canEdit, onClose, onEdit }: { session: Session; data?: ScheduleData; canEdit: boolean; onClose: () => void; onEdit: () => void }) {
+  const warnings = data?.warnings.filter(w => w.sessionIds.includes(session.id)) ?? [];
+  return <Dialog title="Session details" busy={false} onClose={onClose}>
+    <div className="modal-body session-details-body details-layout">
+      <section className="details-overview" aria-label="Lesson information">
+        <div className="details-date"><CalendarDays size={17} aria-hidden="true" /><span>{shortDate(session.date)}</span>{session.mode === 'pair' && <span className="badge pair">Pair session</span>}</div>
+        <strong className="details-time">{session.startTime}–{endTime(session)}<span>{session.durationMin} min</span></strong>
+        <div className="details-resources"><span>{session.tutorName}</span><span className="room-label">Room {session.roomId}</span></div>
+      </section>
+      <section className="details-students" aria-label="Students">
+        {session.bookings.map(b => <article key={b.id} className="details-student">
+          <div className="details-student-heading"><strong>{b.studentName}</strong><Status status={b.status} /></div>
+          {b.sourceNote && <p className="details-note">{b.sourceNote}</p>}
+          {b.cancelledAt && <p className="details-meta">Cancelled {new Date(b.cancelledAt).toLocaleString('en-GB',{timeZone:TIMEZONE,day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</p>}
+          {b.reason && <p className="details-meta">Reason: {b.reason}</p>}
+        </article>)}
+      </section>
+      {session.note && <section className="details-reception-note"><h3>Reception note</h3><p>{session.note}</p></section>}
+      {warnings.length > 0 && <section className="details-conflicts" aria-label="Scheduling issues">
+        {warnings.map((warning,index) => {
+          const presentation = presentConflict(warning,data?.sessions ?? []);
+          const overlap = ['STUDENT_OVERLAP','TUTOR_OVERLAP','ROOM_OVERLAP'].includes(warning.code);
+          const others = overlap ? data?.sessions.filter(s => s.id !== session.id && warning.sessionIds.includes(s.id)) ?? [] : [];
+          const title = warning.code === 'STUDENT_OVERLAP' && session.bookings.length === 1 ? 'Another lesson at this time' : presentation.title;
+          return <div className="details-conflict" key={index}><div className="details-conflict-title"><AlertTriangle size={16} aria-hidden="true" /><strong>{title}</strong></div>
+            {others.map(other => <div className="details-other-lesson" key={other.id}><span>{other.tutorName} <span className="details-meta">· Room {other.roomId}</span></span><strong>{other.startTime}–{endTime(other)}</strong>{other.date !== session.date && <span className="details-meta">{shortDate(other.date)}</span>}</div>)}
+            {!overlap && <p>{presentation.action}</p>}
+          </div>;
+        })}
+      </section>}
+    </div>
+    <div className="modal-footer"><button type="button" className="button secondary" onClick={onClose}>Close</button><button type="button" className="button primary" disabled={!canEdit} onClick={onEdit}><Pencil size={15} />Edit session</button></div>
+  </Dialog>;
+}
+
 function DiscardDialog({ onKeep, onDiscard }: { onKeep: () => void; onDiscard: () => void }) {
   return <Dialog title="Discard unsaved changes?" busy={false} onClose={onKeep}><div className="discard-dialog-body modal-body"><p>Your changes have not been saved.</p></div><div className="modal-footer"><button type="button" className="button secondary" autoFocus onClick={onKeep}>Keep editing</button><button type="button" className="button danger" onClick={onDiscard}>Discard changes</button></div></Dialog>;
 }
@@ -142,6 +179,7 @@ function useMutation(onSaved: () => Promise<void>) {
 }
 function SessionDialog({ data, date, session, initialField, onClose, onSaved, onReload }: { data: ScheduleData; date: string; session?: Session; initialField?: EditField; onClose: () => void; onSaved: () => Promise<void>; onReload: (targetDate?: string) => Promise<boolean> }) {
   const initial: SessionInput = { date: session?.date ?? date, startTime: session?.startTime ?? '09:00', durationMin: (session?.durationMin ?? 60) as 60 | 90, tutorId: session?.tutorId ?? '', roomId: session?.roomId ?? '', mode: session?.mode ?? 'one_to_one', studentIds: session?.bookings.map(b => b.studentId) ?? ['', ''], note: session?.note ?? '', reason: '' };
+  const lockedSchedule = !!session && scheduleLocked(session);
   const originalBookings = session?.bookings.map(({id, studentId, status}) => ({id, studentId, status})) ?? [];
   const [bookings, setBookings] = useState<BookingEdit[]>(originalBookings);
   const [draft, setDraft] = useState(initial);
@@ -161,19 +199,19 @@ function SessionDialog({ data, date, session, initialField, onClose, onSaved, on
     return () => { active = false; };
   }, [draft.date]);
   const availabilityState = !isValidDate(draft.date) || !isValidTime(draft.startTime) ? 'Choose a date and time first' : !availability || availability.date !== draft.date ? 'Checking availability…' : availability.failed ? 'Availability unavailable — checked again on save' : undefined;
-  const activeCount = session ? bookings.filter(b => b.status !== 'cancelled').length : draft.mode === 'pair' ? 2 : 1;
+  const activeCount = session ? bookings.filter(b => b.replacementStudentId || b.status !== 'cancelled').length : draft.mode === 'pair' ? 2 : 1;
   const pickHint = (kind: 'student' | 'tutor' | 'room', id: string, count = activeCount) => availabilityState ? undefined : pickAvailability(availability!.sessions, draft, kind, id, session?.id, count);
 
   const update = <K extends keyof SessionInput>(key: K, value: SessionInput[K]) => { mutation.clearValidation(); setDraft(d => ({...d, [key]:value})); };
   const changed = JSON.stringify({...draft, reason:''}) !== JSON.stringify(initial) || JSON.stringify(bookings) !== JSON.stringify(originalBookings);
   const dirty = changed || !!draft.reason;
-  const capacityError = !!session && draft.mode === 'one_to_one' && bookings.filter(b => b.status !== 'cancelled').length > 1;
+  const capacityError = !!session && draft.mode === 'one_to_one' && bookings.filter(b => b.replacementStudentId || b.status !== 'cancelled').length > 1;
   const fieldError = (field: string) => mutation.error?.fieldErrors?.[field]?.map((message, i) => <span className="field-error" key={i}>{message}</span>);
   const reloadLatest = async () => { setReloading(true); if (await onReload(mutation.uncertain ? submittedDate.current : session?.date ?? date)) onClose(); setReloading(false); };
   const close = () => { if (mutation.pending || reloading) return; if (mutation.uncertain) { void reloadLatest(); return; } if (dirty) setDiscard(true); else onClose(); };
   const selectMode = (mode: SessionInput['mode']) => {
     update('mode', mode);
-    if (session) setBookings(items => mode === 'pair' && items.length < 2 ? [...items, {studentId:'',status:'booked'}] : mode === 'one_to_one' ? items.filter(b => b.id) : items);
+    if (session) setBookings(items => mode === 'pair' && items.filter(b=>b.status!=='cancelled').length < 2 ? [...items, {studentId:'',status:'booked'}] : mode === 'one_to_one' ? items.filter(b => b.id) : items);
   };
   const save = (reason = '') => {
     if (mutation.pending || mutation.uncertain || reloading || capacityError || (session && (!changed || !reason.trim()))) return;
@@ -194,31 +232,35 @@ function SessionDialog({ data, date, session, initialField, onClose, onSaved, on
     {(mutation.uncertain || mutation.error?.code.includes('STALE')) && <button type="button" className="button secondary" disabled={reloading} onClick={() => void reloadLatest()}>{reloading ? 'Reloading…' : 'Load latest schedule and close draft'}</button>}
     <fieldset className="session-inputs" disabled={mutation.pending || mutation.uncertain || reloading}>
     <section className="editor-section" aria-label="Session schedule">
+      {lockedSchedule && <p className="status-impact">This session cannot be rescheduled while it contains a no-show or all bookings are cancelled. You can still update notes or correct booking statuses.</p>}
       <div className="form-grid schedule-fields">
-        <label>Date<input type="date" required value={draft.date} onChange={e => update('date',e.target.value)} />{fieldError('date')}</label>
-        <label>Start time<input data-edit-field="startTime" type="time" required value={draft.startTime} onChange={e => update('startTime',e.target.value)} />{fieldError('startTime')}</label>
-        <label>Duration<SessionSelect label="Duration" editField="durationMin" value={String(draft.durationMin)} options={[{value:'60',label:'60 minutes'},{value:'90',label:'90 minutes'}]} onChange={value => update('durationMin',Number(value) as 60 | 90)} />{fieldError('durationMin')}</label>
+        <label>Date<input disabled={lockedSchedule} type="date" required value={draft.date} onChange={e => update('date',e.target.value)} />{fieldError('date')}</label>
+        <label>Start time<input disabled={lockedSchedule} data-edit-field="startTime" type="time" required value={draft.startTime} onChange={e => update('startTime',e.target.value)} />{fieldError('startTime')}</label>
+        <label>Duration<SessionSelect disabled={lockedSchedule} label="Duration" editField="durationMin" value={String(draft.durationMin)} options={[{value:'60',label:'60 minutes'},{value:'90',label:'90 minutes'}]} onChange={value => update('durationMin',Number(value) as 60 | 90)} />{fieldError('durationMin')}</label>
       </div>
       <p className="end-time">Ends at <strong>{draft.startTime ? endTime({startTime:draft.startTime,durationMin:draft.durationMin} as Session) : '—'}</strong></p>
       <div className="form-grid">
-        <label>Tutor<SessionSelect label="Tutor" editField="tutorId" required value={draft.tutorId} placeholder="Select a tutor" availability={availabilityState} options={data.tutors.map(t => ({value:t.id,label:`${t.name} · ${t.subject}`,hint:pickHint('tutor',t.id)}))} onChange={value => update('tutorId',value)} />{fieldError('tutorId')}</label>
-        <label>Room<SessionSelect label="Room" editField="roomId" required value={draft.roomId} placeholder="Select a room" availability={availabilityState} options={data.rooms.map(r => ({value:r.id,label:r.id,hint:pickHint('room',r.id)}))} onChange={value => update('roomId',value)} />{fieldError('roomId')}</label>
+        <label>Tutor<SessionSelect disabled={lockedSchedule} label="Tutor" editField="tutorId" required value={draft.tutorId} placeholder="Select a tutor" availability={availabilityState} options={data.tutors.map(t => ({value:t.id,label:`${t.name} · ${t.subject}`,hint:pickHint('tutor',t.id)}))} onChange={value => update('tutorId',value)} />{fieldError('tutorId')}</label>
+        <label>Room<SessionSelect disabled={lockedSchedule} label="Room" editField="roomId" required value={draft.roomId} placeholder="Select a room" availability={availabilityState} options={data.rooms.map(r => ({value:r.id,label:r.id,hint:pickHint('room',r.id)}))} onChange={value => update('roomId',value)} />{fieldError('roomId')}</label>
       </div>
     </section>
     <section className="editor-section roster-editor" aria-label="Students and statuses">
-      <fieldset className="mode-field"><legend>Session type</legend><div className="mode-options">{(['one_to_one','pair'] as const).map(mode => <label key={mode} className={draft.mode === mode ? 'selected' : ''}><input type="radio" name="mode" checked={draft.mode === mode} onChange={() => selectMode(mode)} />{mode === 'pair' ? 'Pair' : 'One-to-one'}</label>)}</div></fieldset>
+      <fieldset className="mode-field" disabled={lockedSchedule}><legend>Session type</legend><div className="mode-options">{(['one_to_one','pair'] as const).map(mode => <label key={mode} className={draft.mode === mode ? 'selected' : ''}><input type="radio" name="mode" checked={draft.mode === mode} onChange={() => selectMode(mode)} />{mode === 'pair' ? 'Pair' : 'One-to-one'}</label>)}</div></fieldset>
       {session ? bookings.map((booking,index) => {
         const original = session.bookings.find(b => b.id === booking.id);
         const statusChanged = original && original.status !== booking.status;
-        return <div className="booking-edit-row" key={booking.id ?? 'new-booking'}><div className="form-grid booking-fields">
-          <label>Student {bookings.length > 1 ? index + 1 : ''}<SessionSelect label={bookings.length > 1 ? `Student ${index+1}` : 'Student'} required editField={`student-${booking.id}`} value={booking.studentId} placeholder="Select a student" availability={availabilityState} options={data.students.map(student => { const duplicate=bookings.some((b,i) => i !== index && b.studentId === student.id) || session.bookings.some(b => b.id !== booking.id && b.studentId === student.id); return {value:student.id,label:student.name,disabled:duplicate,hint:duplicate ? 'Already in this session' : pickHint('student',student.id,booking.status === 'cancelled' ? 0 : 1)}; })} onChange={value => {mutation.clearValidation();setBookings(items => items.map((b,i) => i === index ? {...b,studentId:value} : b));}} /></label>
-          <label>Status<SessionSelect label={bookings.length > 1 ? `Status ${index+1}` : 'Status'} editField={`status-${booking.id}`} value={booking.status} options={['booked','no_show','cancelled'].map(value => ({value,label:statusLabel(value),hint:value !== 'cancelled' ? pickHint('student',booking.studentId,1) : undefined}))} onChange={value => {mutation.clearValidation();setBookings(items => items.map((b,i) => i === index ? {...b,status:value as Booking['status']} : b));}} /></label>
+        const row = <div className="booking-edit-row" key={booking.id ?? 'new-booking'}><div className="form-grid booking-fields">
+          <label>Student {bookings.length > 1 ? index + 1 : ''}<SessionSelect label={bookings.length > 1 ? `Student ${index+1}` : 'Student'} required editField={`student-${booking.id}`} value={booking.replacementStudentId ?? booking.studentId} placeholder="Select a student" availability={availabilityState} options={data.students.map(student => { const duplicate=bookings.some((b,i) => i !== index && (b.replacementStudentId ?? b.studentId) === student.id) || session.bookings.some(b => b.id !== booking.id && b.studentId === student.id); return {value:student.id,label:student.name,disabled:duplicate,hint:duplicate ? 'Already in this session' : pickHint('student',student.id,student.id !== original?.studentId || booking.replacementStudentId || booking.status !== 'cancelled' ? 1 : 0)}; })} onChange={value => {mutation.clearValidation();setBookings(items => items.map((b,i) => i === index ? original ? {...b,replacementStudentId:value === original.studentId ? undefined : value} : {...b,studentId:value} : b));}} /></label>
+          <label>Status<SessionSelect disabled={!!booking.replacementStudentId} label={bookings.length > 1 ? `Status ${index+1}` : 'Status'} editField={`status-${booking.id}`} value={booking.replacementStudentId ? 'booked' : booking.status} options={['booked','no_show','cancelled'].map(value => ({value,label:statusLabel(value),hint:booking.status === 'cancelled' && value !== 'cancelled' ? pickHint('student',booking.studentId,1) : undefined}))} onChange={value => {mutation.clearValidation();setBookings(items => items.map((b,i) => i === index ? {...b,status:value as Booking['status']} : b));}} /></label>
         </div>
-        {statusChanged && <p className="status-impact">{booking.status === 'cancelled' ? 'This booking will release its place.' : original.status === 'cancelled' ? 'Restoring this booking will check availability again.' : booking.status === 'no_show' ? 'No-show still reserves the time slot.' : 'This booking will be marked as booked.'}</p>}
-        {original?.status === 'cancelled' && <p className="cancellation-detail">Cancelled{original.cancelledAt ? ` · ${new Date(original.cancelledAt).toLocaleString('en-GB',{timeZone:TIMEZONE,day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}` : ''}{original.reason ? ` · ${original.reason}` : ''}</p>}
-        {original && <>{original.sourceNote && <p className="booking-source-note">{original.sourceNote}</p>}{original.status !== 'cancelled' && original.reason && <p>Previous reason: {original.reason}</p>}</>}
+        {booking.replacementStudentId && <p className="status-impact">{original?.studentName} will be cancelled and replaced by {data.students.find(s=>s.id===booking.replacementStudentId)?.name}. Their history will be kept.</p>}
+        {statusChanged && !booking.replacementStudentId && <p className="status-impact">{booking.status === 'cancelled' ? 'This booking will release its place.' : original.status === 'cancelled' ? 'Restoring this booking will check availability again.' : booking.status === 'no_show' ? 'No-show still reserves the time slot.' : 'This booking will be marked as booked.'}</p>}
+        {!booking.replacementStudentId && original?.status === 'cancelled' && <p className="cancellation-detail">Cancelled{original.cancelledAt ? ` · ${new Date(original.cancelledAt).toLocaleString('en-GB',{timeZone:TIMEZONE,day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}` : ''}{original.reason ? ` · ${original.reason}` : ''}</p>}
+        {original && !booking.replacementStudentId && <>{original.sourceNote && <p className="booking-source-note">{original.sourceNote}</p>}{original.status !== 'cancelled' && original.reason && <p>Previous reason: {original.reason}</p>}</>}
         </div>;
+        return original?.status === 'cancelled' && session.bookings.some(b=>b.status!=='cancelled') ? <details className="cancelled-booking-history" key={booking.id}><summary>{original.studentName} · Cancelled booking</summary>{row}</details> : row;
       }) : <div className="form-grid">{Array.from({length:draft.mode === 'pair' ? 2 : 1},(_,i) => <label key={i}>Student {draft.mode === 'pair' ? i + 1 : ''}<SessionSelect label={draft.mode === 'pair' ? `Student ${i+1}` : 'Student'} required value={draft.studentIds[i] ?? ''} placeholder="Select a student" availability={availabilityState} options={data.students.map(student => {const duplicate=draft.mode === 'pair' && draft.studentIds[1-i] === student.id;return {value:student.id,label:student.name,disabled:duplicate,hint:duplicate ? 'Already selected' : pickHint('student',student.id)};})} onChange={value => {const ids=[...draft.studentIds];ids[i]=value;update('studentIds',ids);}} />{fieldError('studentIds')}</label>)}</div>}
+
       {capacityError && <p className="field-error" role="alert">Choose which booking to cancel before switching to one-to-one.</p>}{fieldError('bookings')}{fieldError('mode')}
     </section>
     {sessionWarnings.length > 0 && <Warnings warnings={sessionWarnings} sessions={data.sessions} prominent />}

@@ -1,5 +1,6 @@
 'use client';
 
+import { currentBookings } from '@/lib/booking-replacement';
 import { useEffect, useRef, useState } from 'react';
 import { useScheduleResource } from '@/hooks/use-schedule-resource';
 import { dayCache, monthCache } from '@/lib/schedule-cache';
@@ -42,7 +43,7 @@ export function MonthCalendar({ date, tutor, student, revision, onSelect }: {
   const month = date.slice(0, 7);
   const { data: current, error, reload } = useScheduleResource(monthCache, month);
   useEffect(() => { void monthCache.load(month).catch(() => {}); }, [month, revision]);
-  const sessions = current?.sessions.filter(s => (!tutor || s.tutorId === tutor) && (!student || s.bookings.some(b => b.studentId === student))) ?? [];
+  const sessions = current?.sessions.filter(s => (!tutor || s.tutorId === tutor) && (!student || currentBookings(s).some(b => b.studentId === student))) ?? [];
   return <section className="month-calendar" aria-label="Monthly schedule" aria-busy={!current && !error}>
     {error && <div className="error-banner" role="alert"><span>{error}</span><button className="text-button" onClick={() => void reload()}>Retry</button></div>}
     {!current && !error && <p className="calendar-loading" role="status">Loading month…</p>}
