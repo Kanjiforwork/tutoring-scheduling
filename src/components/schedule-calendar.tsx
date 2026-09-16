@@ -61,8 +61,7 @@ export function MonthCalendar({ date, tutor, student, revision, onSelect }: {
         aria-label={`${label(day)}${summary ? `, ${summary}` : ''}${cancelledOnly ? ', all cancelled' : ''}`} aria-pressed={day === (selectedDay ?? date)}
         aria-current={day === DEMO_NOW.slice(0, 10) ? 'date' : undefined} aria-haspopup="dialog" aria-expanded={selectedDay === day}>
         <span className="month-day-top"><strong>{Number(day.slice(8))}</strong>{issues > 0 && <AlertTriangle size={13} aria-hidden="true" />}</span>
-        {current && inMonth && items.length > 0 && <><span className="month-count">{items.length}<span className="month-count-label"> {cancelledOnly ? 'cancelled' : items.length === 1 ? 'session' : 'sessions'}</span></span>
-          <span className="month-previews">{items.slice(0, 2).map(s => <span key={s.id} className={s.bookings.every(b => b.status === 'cancelled') ? 'cancelled-preview' : ''}><b>{s.startTime}</b> {s.bookings.map(b => b.studentName).join(' & ')}</span>)}{items.length > 2 && <small>+{items.length - 2} more</small>}</span></>}
+        {current && inMonth && items.length > 0 && <span className="month-count">{items.length}<span className="month-count-label"> {cancelledOnly ? 'cancelled' : items.length === 1 ? 'session' : 'sessions'}</span></span>}
       </button>;
     })}</div>
     {selectedDay && selection && createPortal(<div ref={popover} className="month-day-popover" role="dialog" aria-label={`Open ${label(selectedDay)}`} style={{left:selection.left,top:selection.top}}>
