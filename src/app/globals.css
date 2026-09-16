@@ -218,3 +218,24 @@ html{scrollbar-gutter:stable}
 .conflict-card .conflict-session { grid-template-columns: 1fr; gap: 1px; font-size: 11px; }
 .conflict-card .conflict-session > span:last-child { grid-column: auto; }
 @media (max-width: 600px) { .conflict-grid { grid-template-columns: 1fr; } }
+
+.session-select { position: relative; display: block; min-width: 0; }
+.session-select-trigger { width: 100%; min-height: 44px; border: 1px solid #81948b; border-radius: 7px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; background: white; color: #243b30; font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+.session-select-trigger span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-select-trigger svg { flex-shrink: 0; }
+.session-select-trigger.has-warning { border-color: #b65a63; }
+.session-select-trigger:focus-visible { outline: 2px solid #2b7053; outline-offset: 2px; }
+.session-select-trigger:disabled { opacity: .6; cursor: wait; }
+.select-placeholder { color: #718178; }
+.select-validity { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; border: 0 !important; clip-path: inset(50%); overflow: hidden; pointer-events: none; }
+.session-select-menu { position: fixed; inset: auto; margin: 0; box-sizing: border-box; padding: 5px; border: 1px solid #d3ddd6; border-radius: 9px; background: white; box-shadow: 0 8px 28px #18352924; overflow-y: auto; overscroll-behavior: contain; }
+.session-select-menu::backdrop { background: transparent; }
+.session-select-option { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 42px; padding: 9px 10px; border: 0; border-radius: 5px; color: #243b30; background: transparent; text-align: left; cursor: pointer; font: inherit; font-size: 13px; }
+.session-select-option:hover, .session-select-option:focus-visible { background: #edf5ef; outline: none; }
+.session-select-option[aria-selected="true"] { background: #edf5ef; }
+.session-select-option:disabled { opacity: .5; cursor: not-allowed; }
+.select-option-copy { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 3px 10px; flex: 1; min-width: 0; }
+.select-option-copy small { color: #a4313e; font-size: 11px; font-weight: 400; }
+.select-hint { display: block; margin-top: 5px; color: #a4313e; font-size: 11px; line-height: 1.4; font-weight: 400; }
+.select-hint-neutral { color: #65756b; }
+@media (max-width: 600px) { .session-select-trigger { font-size: 16px; min-height: 46px; } .session-select-option { min-height: 44px; } }

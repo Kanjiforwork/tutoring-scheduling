@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Plus, X, CalendarDays, RefreshCw, AlertTriangle, History, Users, Check, ChevronDown, SlidersHorizontal, Pencil, ArrowUpRight, MoreHorizontal } from 'lucide-react';
+import { SessionSelect } from './session-select';
+import { pickAvailability } from '@/lib/pick-availability';
+import { isValidDate, isValidTime } from '@/lib/domain';
 import { presentConflict } from '@/lib/conflict-presentation';
 import { errorMessages, afterDraftChange } from '@/lib/form-feedback';
 import { WeekStrip, MonthCalendar } from './schedule-calendar';
@@ -147,7 +150,21 @@ function SessionDialog({ data, date, session, initialField, onClose, onSaved, on
   const [reloading, setReloading] = useState(false);
   const submittedDate = useRef(initial.date);
   const mutation = useMutation(onSaved);
-  const update = <K extends keyof SessionInput>(key: K, value: SessionInput[K]) => setDraft(d => ({...d, [key]:value}));
+  const [availability, setAvailability] = useState<{ date: string; sessions: Session[]; failed: boolean } | null>(null);
+  useEffect(() => {
+    let active = true;
+    if (!isValidDate(draft.date)) return;
+    setAvailability(null);
+    void dayCache.load(draft.date, true).then(result => {
+      if (active) setAvailability({ date: draft.date, sessions: result.sessions, failed: false });
+    }).catch(() => { if (active) setAvailability({ date: draft.date, sessions: [], failed: true }); });
+    return () => { active = false; };
+  }, [draft.date]);
+  const availabilityState = !isValidDate(draft.date) || !isValidTime(draft.startTime) ? 'Choose a date and time first' : !availability || availability.date !== draft.date ? 'Checking availability…' : availability.failed ? 'Availability unavailable — checked again on save' : undefined;
+  const activeCount = session ? bookings.filter(b => b.status !== 'cancelled').length : draft.mode === 'pair' ? 2 : 1;
+  const pickHint = (kind: 'student' | 'tutor' | 'room', id: string, count = activeCount) => availabilityState ? undefined : pickAvailability(availability!.sessions, draft, kind, id, session?.id, count);
+
+  const update = <K extends keyof SessionInput>(key: K, value: SessionInput[K]) => { mutation.clearValidation(); setDraft(d => ({...d, [key]:value})); };
   const changed = JSON.stringify({...draft, reason:''}) !== JSON.stringify(initial) || JSON.stringify(bookings) !== JSON.stringify(originalBookings);
   const dirty = changed || !!draft.reason;
   const capacityError = !!session && draft.mode === 'one_to_one' && bookings.filter(b => b.status !== 'cancelled').length > 1;
@@ -180,12 +197,12 @@ function SessionDialog({ data, date, session, initialField, onClose, onSaved, on
       <div className="form-grid schedule-fields">
         <label>Date<input type="date" required value={draft.date} onChange={e => update('date',e.target.value)} />{fieldError('date')}</label>
         <label>Start time<input data-edit-field="startTime" type="time" required value={draft.startTime} onChange={e => update('startTime',e.target.value)} />{fieldError('startTime')}</label>
-        <label>Duration<select data-edit-field="durationMin" value={draft.durationMin} onChange={e => update('durationMin',Number(e.target.value) as 60 | 90)}><option value={60}>60 minutes</option><option value={90}>90 minutes</option></select>{fieldError('durationMin')}</label>
+        <label>Duration<SessionSelect label="Duration" editField="durationMin" value={String(draft.durationMin)} options={[{value:'60',label:'60 minutes'},{value:'90',label:'90 minutes'}]} onChange={value => update('durationMin',Number(value) as 60 | 90)} />{fieldError('durationMin')}</label>
       </div>
       <p className="end-time">Ends at <strong>{draft.startTime ? endTime({startTime:draft.startTime,durationMin:draft.durationMin} as Session) : '—'}</strong></p>
       <div className="form-grid">
-        <label>Tutor<select data-edit-field="tutorId" required value={draft.tutorId} onChange={e => update('tutorId',e.target.value)}><option value="">Select a tutor</option>{data.tutors.map(t => <option key={t.id} value={t.id}>{t.name} · {t.subject}</option>)}</select>{fieldError('tutorId')}</label>
-        <label>Room<select data-edit-field="roomId" required value={draft.roomId} onChange={e => update('roomId',e.target.value)}><option value="">Select a room</option>{data.rooms.map(r => <option key={r.id} value={r.id}>{r.id}</option>)}</select>{fieldError('roomId')}</label>
+        <label>Tutor<SessionSelect label="Tutor" editField="tutorId" required value={draft.tutorId} placeholder="Select a tutor" availability={availabilityState} options={data.tutors.map(t => ({value:t.id,label:`${t.name} · ${t.subject}`,hint:pickHint('tutor',t.id)}))} onChange={value => update('tutorId',value)} />{fieldError('tutorId')}</label>
+        <label>Room<SessionSelect label="Room" editField="roomId" required value={draft.roomId} placeholder="Select a room" availability={availabilityState} options={data.rooms.map(r => ({value:r.id,label:r.id,hint:pickHint('room',r.id)}))} onChange={value => update('roomId',value)} />{fieldError('roomId')}</label>
       </div>
     </section>
     <section className="editor-section roster-editor" aria-label="Students and statuses">
@@ -194,14 +211,14 @@ function SessionDialog({ data, date, session, initialField, onClose, onSaved, on
         const original = session.bookings.find(b => b.id === booking.id);
         const statusChanged = original && original.status !== booking.status;
         return <div className="booking-edit-row" key={booking.id ?? 'new-booking'}><div className="form-grid booking-fields">
-          <label>Student {bookings.length > 1 ? index + 1 : ''}<select required data-edit-field={`student-${booking.id}`} value={booking.studentId} onChange={e => setBookings(items => items.map((b,i) => i === index ? {...b,studentId:e.target.value} : b))}><option value="">Select a student</option>{data.students.map(student => <option key={student.id} value={student.id} disabled={bookings.some((b,i) => i !== index && b.studentId === student.id) || session.bookings.some(b => b.id !== booking.id && b.studentId === student.id)}>{student.name}</option>)}</select></label>
-          <label>Status<select className={`status-select status-${booking.status}`} data-edit-field={`status-${booking.id}`} value={booking.status} onChange={e => setBookings(items => items.map((b,i) => i === index ? {...b,status:e.target.value as Booking['status']} : b))}><option value="booked">Booked</option><option value="no_show">No-show</option><option value="cancelled">Cancelled</option></select></label>
+          <label>Student {bookings.length > 1 ? index + 1 : ''}<SessionSelect label={bookings.length > 1 ? `Student ${index+1}` : 'Student'} required editField={`student-${booking.id}`} value={booking.studentId} placeholder="Select a student" availability={availabilityState} options={data.students.map(student => { const duplicate=bookings.some((b,i) => i !== index && b.studentId === student.id) || session.bookings.some(b => b.id !== booking.id && b.studentId === student.id); return {value:student.id,label:student.name,disabled:duplicate,hint:duplicate ? 'Already in this session' : pickHint('student',student.id,booking.status === 'cancelled' ? 0 : 1)}; })} onChange={value => {mutation.clearValidation();setBookings(items => items.map((b,i) => i === index ? {...b,studentId:value} : b));}} /></label>
+          <label>Status<SessionSelect label={bookings.length > 1 ? `Status ${index+1}` : 'Status'} editField={`status-${booking.id}`} value={booking.status} options={['booked','no_show','cancelled'].map(value => ({value,label:statusLabel(value),hint:value !== 'cancelled' ? pickHint('student',booking.studentId,1) : undefined}))} onChange={value => {mutation.clearValidation();setBookings(items => items.map((b,i) => i === index ? {...b,status:value as Booking['status']} : b));}} /></label>
         </div>
         {statusChanged && <p className="status-impact">{booking.status === 'cancelled' ? 'This booking will release its place.' : original.status === 'cancelled' ? 'Restoring this booking will check availability again.' : booking.status === 'no_show' ? 'No-show still reserves the time slot.' : 'This booking will be marked as booked.'}</p>}
         {original?.status === 'cancelled' && <p className="cancellation-detail">Cancelled{original.cancelledAt ? ` · ${new Date(original.cancelledAt).toLocaleString('en-GB',{timeZone:TIMEZONE,day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}` : ''}{original.reason ? ` · ${original.reason}` : ''}</p>}
         {original && <>{original.sourceNote && <p className="booking-source-note">{original.sourceNote}</p>}{original.status !== 'cancelled' && original.reason && <p>Previous reason: {original.reason}</p>}</>}
         </div>;
-      }) : <div className="form-grid">{Array.from({length:draft.mode === 'pair' ? 2 : 1},(_,i) => <label key={i}>Student {draft.mode === 'pair' ? i + 1 : ''}<select required value={draft.studentIds[i] ?? ''} onChange={e => {const ids=[...draft.studentIds];ids[i]=e.target.value;update('studentIds',ids);}}><option value="">Select a student</option>{data.students.map(student => <option key={student.id} value={student.id} disabled={draft.mode === 'pair' && draft.studentIds[1-i] === student.id}>{student.name}</option>)}</select>{fieldError('studentIds')}</label>)}</div>}
+      }) : <div className="form-grid">{Array.from({length:draft.mode === 'pair' ? 2 : 1},(_,i) => <label key={i}>Student {draft.mode === 'pair' ? i + 1 : ''}<SessionSelect label={draft.mode === 'pair' ? `Student ${i+1}` : 'Student'} required value={draft.studentIds[i] ?? ''} placeholder="Select a student" availability={availabilityState} options={data.students.map(student => {const duplicate=draft.mode === 'pair' && draft.studentIds[1-i] === student.id;return {value:student.id,label:student.name,disabled:duplicate,hint:duplicate ? 'Already selected' : pickHint('student',student.id)};})} onChange={value => {const ids=[...draft.studentIds];ids[i]=value;update('studentIds',ids);}} />{fieldError('studentIds')}</label>)}</div>}
       {capacityError && <p className="field-error" role="alert">Choose which booking to cancel before switching to one-to-one.</p>}{fieldError('bookings')}{fieldError('mode')}
     </section>
     {sessionWarnings.length > 0 && <Warnings warnings={sessionWarnings} sessions={data.sessions} prominent />}
