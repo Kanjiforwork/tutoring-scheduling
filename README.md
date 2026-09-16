@@ -1,8 +1,10 @@
 # Bright Path scheduling
 
+Live demo: [https://brightpathscheduling.vercel.app/](https://brightpathscheduling.vercel.app/)
+
 A daily reception board for arranging lessons, checking conflicts, and keeping visible change history. Reception manages the schedule for students and tutors. This is scheduling, not attendance, payroll, or billing.
 
-The approved deployment is a **public, no-login demonstration with synthetic assignment data** on Vercel and a dedicated Supabase PostgreSQL database. Anyone with the link can change demo bookings. Do not enter real student or family information. [Open the live demo](https://bright-path-scheduling.vercel.app).
+The approved deployment is a **public, no-login demonstration with synthetic assignment data** on Vercel and a dedicated Supabase PostgreSQL database. Anyone with the link can change demo bookings. Do not enter real student or family information. [Open the live demo](https://brightpathscheduling.vercel.app/).
 
 ## Stack and structure
 
