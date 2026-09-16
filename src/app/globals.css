@@ -54,3 +54,139 @@
 .month-day.selected{box-shadow:inset 0 0 0 2px #174C33}
 .month-day-top svg{background:#FFF2CB;color:#805200;border-radius:3px;box-shadow:0 0 0 3px #FFF2CB}
 @media(max-width:767px){.month-day.has-sessions .month-count,.month-day.cancelled-only .month-count{align-self:stretch;padding:1px 2px}.month-day.cancelled-only .month-count{text-decoration:line-through}.month-day.has-sessions{box-shadow:inset 2px 0 0 #49815F}.month-day.selected{box-shadow:inset 0 0 0 2px #174C33}.month-day-top svg{box-shadow:0 0 0 1px #FFF2CB}}
+
+/* Keep navigation anchored while only the view's scrollable content changes. */
+html{scrollbar-gutter:stable}
+.reserved-space{visibility:hidden}
+.schedule-content{height:clamp(420px,calc(100dvh - 380px),720px);overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;position:relative}
+.schedule-content>.month-calendar{min-height:100%;height:100%;display:flex;flex-direction:column}
+.schedule-content .month-grid{flex:1;grid-auto-rows:minmax(56px,1fr)}
+.schedule-content .month-day{min-height:0}
+.schedule-content .month-weekdays{flex-shrink:0}
+.schedule-content>.week-strip{position:sticky;top:0;z-index:2;background:var(--surface)}
+.schedule-totals>span{white-space:nowrap;min-width:68px}
+.schedule-totals>span:nth-of-type(2){min-width:112px}
+@media(max-width:767px){.schedule-content{height:460px}.schedule-content .month-grid{grid-auto-rows:minmax(60px,1fr)}.schedule-totals>span{min-width:62px}}
+.schedule-content{container-type:size}
+.schedule-content.schedule-content--week{height:auto;overflow:visible;container-type:normal;scrollbar-gutter:auto;overscroll-behavior:auto}
+.schedule-content .month-grid{min-height:0}
+@container(max-height:620px){.month-previews{display:none}}
+
+/* Direct field editing keeps the table compact and keyboard accessible. */
+.cell-edit { display: block; width: 100%; background: transparent; border: 0; color: inherit; font: inherit; text-align: left; border-radius: 6px; padding: 6px; margin: -6px; cursor: pointer; }
+.cell-edit:hover { background: #e8f2eb; }
+.cell-edit:focus-visible { outline: 2px solid var(--accent, #28664d); outline-offset: 2px; }
+.student-name .cell-edit { width: auto; }
+.booking-editor { display: grid; gap: 12px; margin-bottom: 24px; }
+.booking-editor-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; }
+.booking-editor-heading small { color: #52665c; }
+.booking-editor-card { padding: 16px; background: #f4f7f4; border: 1px solid #d9e3db; border-radius: 10px; }
+.booking-editor-card .form-grid { margin: 0; }
+.booking-source-note { font-size: 13px; color: #52665c; margin: 10px 0 0; }
+
+.student-name .cell-edit, .mobile-session-top > .cell-edit { width: auto; }
+
+/* Compact session rows; secondary actions and metadata live outside the table flow. */
+.table-wrap td{padding-top:14px;padding-bottom:14px;vertical-align:middle}
+.table-wrap td:nth-child(2){width:26%}
+.table-wrap td.issues-column{width:48px;min-width:48px;padding-inline:6px}
+.table-wrap td:last-child{width:116px;white-space:nowrap}
+.row-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-left:auto}
+.row-more{width:36px;min-height:36px;padding:8px;color:var(--secondary)}
+.row-warning{display:inline-flex;align-items:center;gap:4px;min-height:36px;border:0;border-radius:6px;padding:6px;background:var(--warning-bg);color:var(--warning);font-size:11px;cursor:pointer}
+.session-actions-menu{position:fixed;inset:auto;margin:0;width:260px;max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);overflow:auto;padding:6px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);box-shadow:0 8px 28px #24352d24}
+.session-actions-menu button{display:block;width:100%;padding:11px 10px;text-align:left;border:0;border-radius:5px;background:transparent;color:inherit;font-size:12px;overflow-wrap:anywhere}
+.session-actions-menu button:hover{background:var(--muted)}
+.session-actions-menu .cancel-action{color:var(--danger)}
+.session-details-body{max-height:calc(100dvh - 180px)}
+.booking-detail-section{border-top:1px solid var(--border);padding-top:16px;overflow-wrap:anywhere;font-size:13px}
+.booking-detail-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
+.booking-detail-section p+p{margin-top:6px}
+.session-detail-warnings{padding:12px;background:var(--warning-bg);color:var(--warning);border-radius:8px;font-size:12px}
+.session-detail-warnings h3{margin:0 0 8px;font-size:13px}
+.session-detail-warnings p+p{margin-top:8px}
+@media(max-width:767px){.row-more{min-height:44px;width:44px}.row-warning{min-height:44px;padding:10px}.session-actions-menu button{min-height:44px}}
+
+/* Compact session editor: schedule first, then individual booking states. */
+.modal:has(.session-form) { width: min(740px, calc(100% - 32px)); }
+.session-editor { gap: 18px; }
+.editor-section { display: grid; gap: 12px; }
+.schedule-fields { grid-template-columns: 1.25fr 1fr 1fr; }
+.end-time { font-size: 12px; color: var(--secondary); margin-top: -6px; }
+.roster-editor { border-top: 1px solid var(--border); padding-top: 16px; }
+.roster-editor .mode-field { display: flex; align-items: center; gap: 14px; }
+.roster-editor .mode-field legend { float: left; margin: 0 14px 0 0; padding-top: 10px; }
+.roster-editor .mode-options { display: flex; gap: 6px; }
+.roster-editor .mode-options label { padding: 8px 12px; }
+.booking-edit-row { display: grid; gap: 6px; }
+.booking-fields { grid-template-columns: minmax(0, 1fr) minmax(140px, .6fr); }
+.status-select.status-cancelled { color: #784c43; background: #faf1ef; }
+.status-select.status-booked { color: #28664d; background: #edf6ef; }
+.status-select.status-no_show { color: #875915; background: #fff7e5; }
+.status-impact,.cancellation-detail { font-size: 12px; color: var(--secondary); }
+.optional-label { font-size: 11px; font-weight: 400; color: var(--secondary); }
+.editor-notes label { position: relative; }
+.editor-notes .optional-label { position: absolute; right: 0; top: 0; }
+.draft-status { margin-right: auto; align-self: center; color: var(--secondary); font-size: 11px; }
+@media(max-width:767px) {
+ .modal:has(.session-form) { width: calc(100% - 20px); }
+ .session-editor { gap: 16px; }
+ .schedule-fields { grid-template-columns: 1fr 1fr; }
+ .schedule-fields > label:first-child { grid-column: 1 / -1; }
+ .booking-fields { grid-template-columns: minmax(0, 1fr) minmax(115px, .65fr); gap: 10px; }
+ .roster-editor .mode-options label { min-height: 42px; }
+ .draft-status { max-width: 64px; }
+}
+
+/* Keep existing conflicts visible while reception edits a session. */
+.session-conflict-alert { min-width: 0; padding: 16px 18px; border: 1px solid #efb4b8; border-radius: 12px; background: #fff1f2; color: #8f1d2a; overflow-wrap: anywhere; }
+.session-conflict-heading { display: flex; align-items: flex-start; gap: 9px; font-size: 14px; line-height: 1.5; }
+.session-conflict-heading svg { flex-shrink: 0; margin-top: 1px; }
+.session-conflict-context { margin: 6px 0 0; font-size: 12px; line-height: 1.6; }
+.session-conflict-alert ul { margin: 10px 0 0; padding-left: 20px; font-size: 13px; line-height: 1.65; }
+.session-conflict-alert li + li { margin-top: 8px; }
+@media (max-width: 600px) { .session-conflict-alert { padding: 14px; } }
+
+.session-inputs { display: contents; }
+.editor-notes-single { grid-template-columns: minmax(0, 1fr); }
+.modal:has(.change-reason-form) { width: min(480px, calc(100% - 32px)); }
+.reason-intro { margin: 0; color: #52645b; font-size: 14px; line-height: 1.6; }
+.change-reason-form textarea { width: 100%; box-sizing: border-box; }
+
+.modal:has(.discard-dialog-body), .modal:has(.cancel-booking-form) { width: min(480px, calc(100% - 32px)); }
+.discard-dialog-body p { margin: 0; font-size: 14px; line-height: 1.6; color: #52645b; }
+
+
+.conflict-saved-label { margin-left: auto; color: #98515a; font-size: 11px; font-weight: 400; }
+.conflict-title { margin: 9px 0 7px; font-size: 13px; line-height: 1.5; }
+.conflict-item + .conflict-item { margin-top: 14px; }
+.conflict-sessions { display: grid; gap: 5px; }
+.conflict-session { display: grid; grid-template-columns: 105px 110px auto; gap: 12px; align-items: baseline; font-size: 12px; line-height: 1.6; font-variant-numeric: tabular-nums; }
+.conflict-session strong { font-weight: 600; }
+@media (max-width: 600px) {
+ .conflict-saved-label { font-size: 10px; }
+ .conflict-session { grid-template-columns: 1fr 1fr; gap: 2px 8px; }
+ .conflict-session > span:last-child { grid-column: 2; }
+}
+
+/* Month view uses a quiet occupancy tint and one clear selection treatment. */
+.month-calendar .month-day { padding: 10px 12px; gap: 6px; }
+.month-calendar .month-day.has-sessions { background: #f0f6f2; box-shadow: none; }
+.month-calendar .month-day.empty-day { background: #fff; }
+.month-calendar .month-day.outside-month { background: #f5f6f5; color: #87928b; }
+.month-calendar .month-day.cancelled-only { background: #f8f9f8; }
+.month-calendar .month-day:hover { background: #e8f1eb; }
+.month-calendar .month-day.has-sessions .month-count,
+.month-calendar .month-day.cancelled-only .month-count { background: transparent; padding: 0; color: #426b53; font-size: 11px; font-weight: 500; border-radius: 0; text-align: left; }
+.month-calendar .month-day.cancelled-only .month-count { color: #7b837e; text-decoration: none; }
+.month-calendar .month-day.selected { background: #e5f0e9; box-shadow: inset 0 0 0 2px #347452; }
+.month-calendar .month-day:focus { outline: none; }
+.month-calendar .month-day:focus-visible { outline: 2px solid #347452; outline-offset: -4px; }
+.month-calendar .month-day-top svg { background: transparent; box-shadow: none; color: #a77829; }
+.month-calendar .month-weekdays { background: #fafbf9; }
+.month-day-popover { position: fixed; z-index: 50; width: min(260px, calc(100vw - 24px)); padding: 12px; border: 1px solid #d5e1d8; border-radius: 12px; background: #fff; box-shadow: 0 8px 28px rgba(28,55,39,.15); color: var(--text); }
+.month-popover-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:14px; }
+.month-popover-heading .button { width:32px; min-height:32px; padding:6px; }
+.month-day-popover p { font-size:12px; color:var(--secondary); margin:4px 0 12px; }
+.month-open-day { width:100%; min-height:44px; justify-content:space-between; }
+@media(max-width:767px) { .month-calendar .month-day { padding:6px 4px; gap:4px; } .month-calendar .month-count { font-size:11px; } }
