@@ -34,7 +34,7 @@ The selected feature deliberately leaves messaging fragmentation and billing man
 
 | Topic | Evidence / v1 decision | Discovery question and impact |
 | --- | --- | --- |
-| Opening days | PDF: Tuesday-Sunday; Monday closed | Are holidays or exceptional opening days needed? Would require an availability calendar |
+| Opening days | PDF: Tuesday-Sunday; Monday closed | Bao approved per-save Monday confirmation; other holidays remain undefined. No availability calendar in v1 |
 | Opening hours | PDF says mid-morning to mid-evening; **09:00-22:00 is our assumption**, covering observed seed times | Exact hours? Change one shared configuration and boundary tests |
 | Duration | PDF: 60 or 90 minutes | No further duration choices in v1 |
 | Pair lessons | PDF calls lessons one-to-one, but Mai explicitly describes intentional pairs; L009/L010 confirm one | Are pairs official and what capacity applies? v1 supports exactly two distinct students |
@@ -139,7 +139,7 @@ Cutoff is 16:00 on the local day before a session. Use `occurred_at >= cutoff` a
 
 ## 9. Critical paths and limits
 
-Create: receptionist fills form -> UI preserves draft while submitting -> API validates -> lock and fresh conflict checks -> session plus one/two bookings plus audit commit together -> UI refreshes and renders the new row. Failure cases: invalid input, overlap, daily load, closed day, database/network failure, ambiguous response after a successful commit. Do not automatically retry an ambiguous create; refresh first.
+Create: receptionist fills form -> UI preserves draft while submitting -> API validates -> lock and fresh conflict checks -> session plus one/two bookings plus audit commit together -> UI refreshes and renders the new row. For Monday, a secondary confirmation precedes the request. The optional boolean `closedDayConfirmed` permits only CLOSED_DAY; the transaction records "Closed-day exception confirmed." in its audit reason and still validates other constraints. Schedule warnings retain CLOSED_DAY. Failure cases: invalid input, overlap, daily load, unconfirmed closed day, database/network failure, ambiguous response after a successful commit. Do not automatically retry an ambiguous create; refresh first.
 
 Cancel: receptionist selects one student's booking and gives a reason -> API locks and checks session version -> booking becomes cancelled, version increases, audit records before/after -> UI refreshes. The tutor and room are released only if no active booking remains. Stale version and already-cancelled state return clear conflicts; historical scheduling violations do not block cancellation.
 

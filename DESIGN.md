@@ -67,7 +67,7 @@ Use the supplied Origami Geométrico reference for its explicit tokens, componen
 - **Language:** English UI, with real student names preserved as supplied.
 - **Primary outcome:** Reception can identify who is learning, when, with whom, and where, then understand any issue before saving.
 
-This file defines appearance and interaction. Existing business rules, source analysis, data model, and API decisions are preserved in [TECHNICAL_DESIGN.md](TECHNICAL_DESIGN.md). Execution and acceptance checks remain in [MASTER_PLAN.md](MASTER_PLAN.md). This document does not introduce business-rule overrides or imply implementation is complete.
+This file defines appearance and interaction. Existing business rules, source analysis, data model, and API decisions are preserved in [TECHNICAL_DESIGN.md](TECHNICAL_DESIGN.md). Execution and acceptance checks remain in [MASTER_PLAN.md](MASTER_PLAN.md). Monday saves use a separate "Schedule on a closed day?" dialog with date/time/room and Back to editing / Confirm and save actions. This explicitly approved exception does not waive other scheduling rules or imply implementation is complete.
 
 ## Colors
 
@@ -249,3 +249,6 @@ Use semantic headings and a real table on desktop. Give form fields programmatic
 ## Scope and Review
 
 This specification is for the daily scheduling board, its forms, warnings, and history only. It is ready to guide a future UI implementation; it is not a rendered mockup or a claim of browser/accessibility verification. Preserve unresolved policy questions in the technical design and assessment decisions rather than solving them with a decorative UI control.
+
+
+History navigation: audit entries now live on `/history`, reached through the shared Schedule / History navigation. The selected lesson date carries across both pages. History includes date navigation, refresh/retry, empty state, cutoff badges, and expandable before/after snapshots. Moving a session still appears for both its old and new lesson dates. The schedule page no longer embeds the history accordion. This is a separate view of the existing audit feature, not a new write workflow.

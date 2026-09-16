@@ -1,0 +1,11 @@
+.env*
+!.env.example
+ref/
+tests/
+scripts/
+supabase/
+AGENTS.md
+MASTER_PLAN.md
+DESIGN.md
+TECHNICAL_DESIGN.md
+coverage/

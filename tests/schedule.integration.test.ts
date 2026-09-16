@@ -226,6 +226,24 @@ suite('PostgreSQL schedule transactions (isolated retained fixtures)', () => {
     expect((await getSchedule(date)).changes.filter(c=>c.sessionId===session.id)).toEqual(history);
   });
 
+  it('requires closed-day confirmation, records it, and still blocks overlaps', async () => {
+    const f=await fixtures();
+    const monday={...f.input,date:'2026-03-02'};
+    await expect(createSession(monday)).rejects.toMatchObject({code:'SCHEDULE_CONFLICT',conflicts:expect.arrayContaining([expect.objectContaining({code:'CLOSED_DAY'})])});
+    const created=await createSession({...monday,closedDayConfirmed:true});
+    const before=await find(created.id);
+    const history=(await getSchedule(monday.date)).changes.filter(c=>c.sessionId===created.id);
+    expect(history).toHaveLength(1);
+    expect(history[0].reason).toContain('Closed-day exception confirmed.');
+    expect((await getSchedule(monday.date)).warnings).toEqual(expect.arrayContaining([expect.objectContaining({code:'CLOSED_DAY',sessionIds:expect.arrayContaining([created.id])})]));
+    await expect(createSession({...monday,closedDayConfirmed:true,studentIds:[f.students[1]]})).rejects.toMatchObject({code:'SCHEDULE_CONFLICT'});
+    await expect(editSession(before.id,edit(before,{startTime:'11:00'}))).rejects.toMatchObject({code:'SCHEDULE_CONFLICT'});
+    expect(await find(before.id)).toEqual(before);
+    await editSession(before.id,edit(before,{startTime:'11:00',closedDayConfirmed:true}));
+    expect((await find(before.id)).startTime).toBe('11:00');
+    expect((await getSchedule(monday.date)).changes.filter(c=>c.sessionId===before.id)[0].reason).toContain('Closed-day exception confirmed. Integration test change');
+  });
+
   it('shows move snapshots on both the old and new day', async () => {
     const f = await fixtures();
     const created = await createSession(f.input);

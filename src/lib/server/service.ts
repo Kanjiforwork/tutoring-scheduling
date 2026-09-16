@@ -1,3 +1,4 @@
+import { blockingWarnings, exceptionAuditReason } from '../closed-day';
 import { replaceBooking } from '../booking-replacement';
 import { editPolicyError } from '../edit-policy';
 import { monthBounds } from '../calendar';
@@ -46,8 +47,8 @@ async function audit(q:Query, action:ScheduleChange['action'], before:Session|nu
   await q`insert into ${table(q,'schedule_changes')} (id,session_id,booking_id,action,before_snapshot,after_snapshot,occurred_at,reason,after_cutoff)
     values (${randomUUID()},${after.id},${bookingId??null},${action},${before? q.json(JSON.parse(JSON.stringify(before))) : null},${q.json(JSON.parse(JSON.stringify(after)))},${DEMO_NOW},${reason||null},${isAfterCutoff(DEMO_NOW,before?.date??null,after.date)})`;
 }
-function validCandidate(candidate:Session, all:Session[]) {
-  const warnings = validateSession(candidate,all.filter(s=>s.id!==candidate.id));
+function validCandidate(candidate:Session, all:Session[], closedDayConfirmed = false) {
+  const warnings = blockingWarnings(validateSession(candidate,all.filter(s=>s.id!==candidate.id)),closedDayConfirmed);
   if(warnings.length) throw new ScheduleError(409,'SCHEDULE_CONFLICT',warnings[0].message,warnings);
 }
 function current(all:Session[], id:string, version:number) {
@@ -69,11 +70,11 @@ export async function createSession(input:SessionInput) {
     const tutor=options.tutors.find(t=>t.id===input.tutorId);
     if(!tutor || !options.rooms.some(r=>r.id===input.roomId) || input.studentIds.some(id=>!options.students.some(s=>s.id===id))) throw new ScheduleError(404,'CATALOG_NOT_FOUND','A selected student, tutor or room does not exist.');
     const candidate:Session={id:randomUUID(),date:input.date,startTime:input.startTime,durationMin:input.durationMin,tutorId:input.tutorId,tutorName:tutor.name,roomId:input.roomId,mode:input.mode,note:input.note ?? '',version:1,bookings:input.studentIds.map(id=>({id:randomUUID(),studentId:id,studentName:options.students.find(s=>s.id===id)!.name,status:'booked',cancelledAt:null,reason:null,sourceLessonId:null,sourceNote:null}))};
-    validCandidate(candidate,await readSessions(tx,input.date));
+    validCandidate(candidate,await readSessions(tx,input.date),input.closedDayConfirmed);
     await tx`insert into ${table(tx,'sessions')} (id,starts_at,ends_at,tutor_id,room_id,mode,version,note)
       values (${candidate.id},${instant(candidate)}::timestamptz,${instant(candidate)}::timestamptz + ${candidate.durationMin} * interval '1 minute',${candidate.tutorId},${candidate.roomId},${candidate.mode},1,${candidate.note ?? ''})`;
     for(const b of candidate.bookings) await tx`insert into ${table(tx,'bookings')} (id,session_id,student_id,status) values (${b.id},${candidate.id},${b.studentId},'booked')`;
-    await audit(tx,'created',null,candidate,input.reason);
+    await audit(tx,'created',null,candidate,exceptionAuditReason(candidate.date,input.closedDayConfirmed,input.reason));
     return {id:candidate.id,version:1};
   });
 }
@@ -107,13 +108,13 @@ export async function editSession(id:string,input:EditInput) {
     const after:Session={...before,date:input.date,startTime:input.startTime,durationMin:input.durationMin,tutorId:input.tutorId,tutorName:tutor.name,roomId:input.roomId,bookings,mode,note:input.note ?? before.note ?? '',version:before.version+1};
     // Cancellation alone must remain possible even on an invalid imported session.
     const cancellationOnly = ['date','startTime','durationMin','tutorId','roomId','mode'].every(key=>before[key as keyof Session]===after[key as keyof Session]) && after.bookings.every(b=>{const old=before.bookings.find(o=>o.id===b.id)!;return !!old && b.studentId===old.studentId && (b.status===old.status || b.status==='cancelled');});
-    if (!cancellationOnly) validCandidate(after,all);
+    if (!cancellationOnly) validCandidate(after,all,input.closedDayConfirmed);
     for(const b of after.bookings) {
       if(before.bookings.some(old=>old.id===b.id)) await tx`update ${table(tx,'bookings')} set student_id=${b.studentId},status=${b.status},cancelled_at=${b.cancelledAt},reason=${b.reason} where id=${b.id}`;
       else await tx`insert into ${table(tx,'bookings')} (id,session_id,student_id,status,cancelled_at,reason) values (${b.id},${id},${b.studentId},${b.status},${b.cancelledAt},${b.reason})`;
     }
     await tx`update ${table(tx,'sessions')} set starts_at=${instant(after)}::timestamptz,ends_at=${instant(after)}::timestamptz + ${after.durationMin} * interval '1 minute', tutor_id=${after.tutorId},room_id=${after.roomId},mode=${after.mode},note=${after.note ?? ''},version=${after.version} where id=${id}`;
-    await audit(tx,'rescheduled',before,after,input.reason);
+    await audit(tx,'rescheduled',before,after,exceptionAuditReason(after.date,input.closedDayConfirmed,input.reason));
     return {id,version:after.version};
   });
 }

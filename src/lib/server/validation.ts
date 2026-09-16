@@ -1,6 +1,7 @@
 import { z } from 'zod';
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(v => { const d = new Date(v+'T00:00:00Z'); return !isNaN(d.getTime()) && d.toISOString().slice(0,10) === v; }, 'Enter a real calendar date');
 const fields = {
+  closedDayConfirmed: z.boolean().optional(),
   date,
   note: z.string().trim().max(1000).optional(),
   startTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),

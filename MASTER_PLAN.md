@@ -20,7 +20,7 @@ Build **one feature: reception manages the daily schedule on a board, with const
 - Success: the app runs with the supplied seed, preserves historical violations, prevents invalid new scheduling writes, and Bao can explain the complete flow.
 - Main risks: treating intentional pairs as conflicts, blocking historical import, concurrent writes using stale data, and confusing an audit badge with notification delivery.
 
-Out of scope: catalog CRUD, recurring schedules, drag-and-drop, billing calculations, WhatsApp sending, login, Realtime, a separate attendance workflow, and additional administration tabs. Catalogs are predefined selection options. No generic rule engine, policy settings screen, or override button in v1.
+Out of scope: catalog CRUD, recurring schedules, drag-and-drop, billing calculations, WhatsApp sending, login, Realtime, a separate attendance workflow, and additional administration tabs. Catalogs are predefined selection options. No generic rule engine or policy settings screen in v1. Monday scheduling has one explicitly confirmed exception flow.
 
 ### Timebox
 
@@ -49,13 +49,13 @@ Historical behaviour is evidence to investigate, not blanket permission to repro
 | Class | Rules | v1 handling |
 | --- | --- | --- |
 | Mandatory feasibility constraints | A student cannot attend overlapping sessions; a tutor cannot teach overlapping independent sessions; a room cannot host overlapping independent sessions | Block invalid new scheduling writes; no override |
-| Operating policies | Opening days/hours, permitted durations, daily tutor booking limit | Centralize policy values; enforce the v1 decisions below. No policy editor or exception workflow |
+| Operating policies | Opening days/hours, permitted durations, daily tutor booking limit | Centralize policy values; enforce the v1 decisions below. No policy editor; Monday exceptions require confirmation for each save |
 | Supported business cases | Intentional pair teaching; changes after cutoff | Model explicitly and preserve history rather than treating them as accidental errors |
 | Historical violations | Existing overlaps, excessive load, Monday booking | Preserve and display warnings; apply the edit/cancellation rules in section 4 |
 
 | Topic | v1 decision |
 | --- | --- |
-| Opening days | Tuesday-Sunday; reject new/rescheduled sessions on Monday |
+| Opening days | Tuesday-Sunday by default; Monday requires a separate confirmation before saving |
 | Opening hours | **Assume 09:00-22:00**; the whole session must fit within that interval on one local day. The PDF gives no exact hours |
 | Duration | Only 60 or 90 minutes |
 | Interval boundaries | Use `[start, end)`; adjacent sessions are allowed |
@@ -67,7 +67,7 @@ Historical behaviour is evidence to investigate, not blanket permission to repro
 | Cancel one student in a pair | Shared tutor/room remain occupied while another resource-consuming booking remains |
 | Edit a pair | Apply schedule changes to the entire session; explain the affected students in the form |
 
-The owner explicitly wants the tutor limit enforced. Do not infer an overload exception from Mai's historical violations. Monday exceptions may be a legitimate future need, but require owner clarification before supporting them. `DECISIONS.md` must retain questions about booking-versus-session counting, official pair policy, exact hours, and exceptional opening days, with how each answer changes the implementation.
+The owner explicitly wants the tutor limit enforced. Do not infer an overload exception from Mai's historical violations. Bao approved Monday exceptions on 16 September 2026: require a separate confirmation, record it in the audit reason, and retain the closed-day warning. This does not waive overlaps, opening hours, duration or tutor load. `DECISIONS.md` must retain questions about booking-versus-session counting, official pair policy, exact hours, and exceptional opening days, with how each answer changes the implementation.
 
 ### Demo clock and billing boundary
 
@@ -226,7 +226,7 @@ Use any actual remaining slack as buffer, not additional feature scope. If DB ac
 - All identified historical violations are detected without mutating the source data.
 - Student, tutor, and room overlaps are blocked; adjacent sessions are allowed.
 - Sixth active student booking allowed, seventh rejected; pair counts two; cancelled excluded.
-- Monday, unsupported duration, and out-of-hours sessions blocked; exact opening boundaries covered.
+- Monday saves require explicit confirmation; unsupported duration and out-of-hours sessions remain blocked. Exact opening boundaries are covered.
 - Pair requires distinct students; one-to-one exactly one; existing booking identity cannot change; adding a distinct second booking for a pair is supported.
 - Last cancellation releases shared resources; first pair cancellation does not; no-show remains resource-consuming.
 - Cancellation works on invalid historical data; room-only edit on a still-overloaded tutor-day is rejected with a clear reason.
@@ -277,3 +277,6 @@ Live public demo: https://bright-path-scheduling.vercel.app. Runtime DATABASE_UR
 
 
 Participant replacement (approved 16 September 2026): reception can select a new student in the same session. The request retains the old studentId/id and supplies replacementStudentId. The old booking is cancelled (an existing cancellation timestamp/reason is preserved), a new booking is created, and the session version plus before/after audit are committed atomically. Schedule and peer bookings are unchanged unless separately edited. A conflicting replacement or stale version writes nothing. A student who already has a retained booking in that session must use their existing booking's status correction instead, avoiding duplicate identity. The main board and filters use active participants where present; cancelled participants remain accessible in session details, the collapsed editor history and audit. No record is deleted.
+
+
+History navigation: audit entries now live on `/history`, reached through the shared Schedule / History navigation. The selected lesson date carries across both pages. History includes date navigation, refresh/retry, empty state, cutoff badges, and expandable before/after snapshots. Moving a session still appears for both its old and new lesson dates. The schedule page no longer embeds the history accordion. This is a separate view of the existing audit feature, not a new write workflow.

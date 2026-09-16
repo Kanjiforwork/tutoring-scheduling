@@ -285,3 +285,12 @@ html{scrollbar-gutter:stable}
 
 .cancelled-booking-history { margin: 12px 0; font-size: 12px; color: #65756b; }
 .cancelled-booking-history > summary { cursor: pointer; padding: 8px 0; }
+
+.page-nav { display: flex; gap: 6px; margin-left: auto; margin-right: 20px; }
+.page-nav a { display: flex; align-items: center; min-height: 44px; padding: 8px 14px; border-radius: 7px; color: var(--secondary); font-size: 13px; text-decoration: none; }
+.page-nav a[aria-current="page"] { background: #eaf2ec; color: var(--green); font-weight: 600; }
+.history-page-body { padding: 6px 24px 24px; }
+.history-workspace .date-subtitle { max-width: none; }
+@media(max-width:600px) { .header-inner { flex-wrap: wrap; gap: 12px; } .page-nav { order: 3; width: 100%; margin: 0; } .page-nav a { flex: 1; justify-content: center; } .demo-info { margin-left: auto; } .history-page-body { padding: 0 16px 16px; } .history-workspace .day-heading { flex-wrap: wrap; } }
+
+.closed-day-summary { display: flex; flex-direction: column; gap: 5px; font-size: 14px; }

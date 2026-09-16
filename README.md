@@ -144,3 +144,11 @@ The editor now supports replacing a student without recreating the session. It s
 ## Local commit checkpoint
 
 Application changes are committed through `6d4dae6`: warning fallbacks (`1be4c41`), transaction and booking identity fixes (`29460ba`), and editor/conflict presentation (`6d4dae6`). Typecheck, 74 unit tests and 13 isolated PostgreSQL integration tests passed for these changes before commit. The earlier uncommitted checkpoints above describe when their checks were recorded. No push or new deployment was performed; the historical production deployment is not a deployment of this commit.
+
+
+History navigation: audit entries now live on `/history`, reached through the shared Schedule / History navigation. The selected lesson date carries across both pages. History includes date navigation, refresh/retry, empty state, cutoff badges, and expandable before/after snapshots. Moving a session still appears for both its old and new lesson dates. The schedule page no longer embeds the history accordion. This is a separate view of the existing audit feature, not a new write workflow.
+
+
+Closed-day confirmation follow-up: Monday create/edit saves now ask for explicit confirmation in a separate dialog. The server waives only CLOSED_DAY and records confirmation in the audit reason; overlaps, operating hours, duration and tutor load still apply. Typecheck, 77 unit tests and 14 isolated PostgreSQL integration tests passed (116 seconds for integration). Browser verified the create confirmation and Back to editing preserving the draft, without writing demo data.
+
+Production checkpoint — 16 September 2026: deployment `dpl_2HeAxP4coe9S7dn3YDe94Hwc34Dh` is ready at https://brightpathscheduling.vercel.app. Vercel production build and TypeScript checks passed. Homepage, `/history`, and read-only `/api/schedule` returned HTTP 200. Application-source hashes remained unchanged during deployment. This deployment includes History navigation and confirmed Monday exceptions; it was deployed from the working tree before the accompanying local commit.

@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { ArrowLeft, ArrowRight, Plus, X, CalendarDays, RefreshCw, AlertTriangle, History, Users, Check, ChevronDown, SlidersHorizontal, Pencil, ArrowUpRight, MoreHorizontal } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Plus, X, CalendarDays, RefreshCw, AlertTriangle, Users, Check, ChevronDown, SlidersHorizontal, Pencil, ArrowUpRight, MoreHorizontal } from 'lucide-react';
+import { isClosedDay } from '@/lib/closed-day';
+import { AppHeader } from './app-header';
 import { currentBookings } from '@/lib/booking-replacement';
 import { scheduleLocked } from '@/lib/edit-policy';
 import { SessionSelect } from './session-select';
@@ -13,7 +15,7 @@ import { WeekStrip, MonthCalendar } from './schedule-calendar';
 import { dayCache, monthCache, invalidateSchedule } from '@/lib/schedule-cache';
 import { useScheduleResource } from '@/hooks/use-schedule-resource';
 import { shiftMonth, weekDates } from '@/lib/calendar';
-import { DEMO_NOW, INITIAL_DATE, TIMEZONE, type ApiError, type Booking, type BookingEdit, type ScheduleChange, type ScheduleData, type Session, type SessionInput, type Warning } from '@/lib/contracts';
+import { DEMO_NOW, INITIAL_DATE, TIMEZONE, type ApiError, type Booking, type BookingEdit, type ScheduleData, type Session, type SessionInput, type Warning } from '@/lib/contracts';
 
 const formatDay = (date: string) => new Date(`${date}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 const weekday = (date: string) => new Date(`${date}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'long' });
@@ -41,11 +43,9 @@ function Warnings({ warnings, prominent = false, sessions = [] }: { warnings: Wa
   if (!warnings.length) return null;
   return <section className="session-conflict-alert" role="alert" aria-label="Existing schedule conflicts"><div className="session-conflict-heading"><AlertTriangle size={18} aria-hidden="true" /><strong>Schedule conflict</strong><span className="conflict-saved-label">Saved schedule</span></div><ConflictItems warnings={warnings} sessions={sessions} /></section>;
 }
-function Snapshot({ session }: { session: Session | null }) { return session ? <div className="snapshot"><strong>{formatDay(session.date)} · {session.startTime}–{endTime(session)}</strong><span>{session.tutorName} · {session.roomId}</span>{session.note && <span>Note: {session.note}</span>}{session.bookings.map(b => <span key={b.id}>{b.studentName} · {statusLabel(b.status)}</span>)}</div> : <span className="muted">No previous session</span>; }
-function Change({ change, date }: { change: ScheduleChange; date: string }) { const moved = change.before && change.before.date !== change.after.date; return <article className="change"><div className="change-heading"><strong>{moved ? change.before?.date === date ? `Moved to ${formatDay(change.after.date)}` : `Moved from ${formatDay(change.before!.date)}` : change.action === 'created' ? 'Session created' : change.action === 'cancelled' ? 'Booking cancelled' : 'Session updated'}</strong>{change.afterCutoff && <span className="badge warning-badge" title="Changed after the schedule cutoff; notification is not confirmed.">After cutoff</span>}<time>{new Date(change.occurredAt).toLocaleString('en-GB', { timeZone: TIMEZONE, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}</time></div>{change.reason && <p>{change.reason}</p>}<details><summary>View before and after</summary><div className="snapshot-grid"><div><span className="eyebrow">Before</span><Snapshot session={change.before} /></div><div><span className="eyebrow">After</span><Snapshot session={change.after} /></div></div></details></article>; }
 
-export function SchedulingBoard() {
-  const [date, setDate] = useState(INITIAL_DATE);
+export function SchedulingBoard({ initialDate = INITIAL_DATE }: { initialDate?: string }) {
+  const [date, setDate] = useState(initialDate);
   const [view, setView] = useState<'week' | 'month'>('week');
   const [calendarRevision, setCalendarRevision] = useState(0);
   const { data, loading, error: loadError, reload: refreshDay, refreshing } = useScheduleResource(dayCache, date);
@@ -84,7 +84,7 @@ export function SchedulingBoard() {
   const actions = (s: Session) => <div className="row-actions">{editButton(s)}<SessionActions session={s} canWrite={canWrite} onDetails={() => setDetailsSession(s)} onCancel={b => setCancelling({ session: s, booking: b })} /></div>;
   const warnings = (s: Session) => { const count = data?.warnings.filter(w => w.sessionIds.includes(s.id)).length ?? 0; return count > 0 ? <button className="row-warning" aria-label={`View ${count} scheduling issues`} onClick={() => setDetailsSession(s)}><AlertTriangle size={15} /><span>{count}</span></button> : null; };
 
-  return <><header className="site-header"><div className="header-inner"><a className="brand" href="/" aria-label="Bright Path home"><span className="brand-mark"><span /></span><span>bright path<span className="brand-caption">LEARNING CENTRE</span></span></a><details className="demo-info"><summary>Demo</summary><div><p>Sample data</p><p>Today: {new Date(DEMO_NOW).toLocaleString('en-GB', { timeZone: TIMEZONE, day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })} · UTC+7</p></div></details></div></header>
+  return <><AppHeader date={date} active="schedule" />
     <main className="workspace">
       <section className="day-heading"><div><p className="eyebrow">SCHEDULE</p><h1>{view === 'month' ? new Date(`${date}T12:00:00Z`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }) : formatDay(date)}</h1><p className={`date-subtitle${view === 'month' ? ' reserved-space' : ''}`} aria-hidden={view === 'month'}>{weekday(date)}</p></div><button className="button primary add-button" disabled={!canWrite} onClick={() => setEditor({})}><Plus size={18} />Add session</button></section>
       <section className="board" aria-label="Daily schedule"><div className="board-toolbar"><div className="date-controls"><div className="nav-group"><button className="button icon" aria-label={view === 'week' ? 'Previous week' : 'Previous month'} onClick={() => setDate(view === 'week' ? moveDay(date, -7) : shiftMonth(date, -1))}><ArrowLeft size={17} /></button><button className="button today" onClick={() => setDate(DEMO_NOW.slice(0, 10))}>Today</button><button className="button icon" aria-label={view === 'week' ? 'Next week' : 'Next month'} onClick={() => setDate(view === 'week' ? moveDay(date, 7) : shiftMonth(date, 1))}><ArrowRight size={17} /></button></div><label className="date-input"><CalendarDays size={16} /><input aria-label="View date" type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} /></label></div><div className="schedule-totals"><div className="view-switch" role="group" aria-label="Calendar view">{(['week', 'month'] as const).map(mode => <button key={mode} type="button" aria-pressed={view === mode} onClick={() => setView(mode)}>{mode === 'week' ? 'Week' : 'Month'}</button>)}</div><span className={view === 'month' ? 'reserved-space' : ''} aria-hidden={view === 'month'}><strong>{data?.sessions.length ?? '—'}</strong> sessions</span><span className={view === 'month' ? 'reserved-space' : ''} aria-hidden={view === 'month'}><strong>{data ? activeCount : '—'}</strong> active bookings</span><button className="button icon refresh" aria-label="Refresh schedule" disabled={loading} onClick={() => { setNotice(''); invalidateSchedule(); setCalendarRevision(value => value + 1); void reload(); }}><RefreshCw size={16} className={loading || refreshing ? 'spin' : ''} /></button></div></div>
@@ -100,7 +100,6 @@ export function SchedulingBoard() {
         </>}
         </div>
         </section>
-      {view === 'week' && <details className="history-panel"><summary><span><History size={18} /><strong>Changes for this day</strong><span className="count-badge">{data?.changes.length ?? 0}</span></span><ChevronDown size={18} /></summary><div className="history-body">{data?.changes.length ? data.changes.map(c => <Change key={c.id} change={c} date={date} />) : <p className="history-empty">No changes recorded.</p>}</div></details>}
       
     </main>{detailsSession && <SessionDetails session={detailsSession} data={data ?? undefined} canEdit={canWrite} onClose={() => setDetailsSession(null)} onEdit={() => { setEditor({session:detailsSession}); setDetailsSession(null); }} />}{editor && data && <SessionDialog key={editor.session?.id ?? `new-${date}`} data={data} date={date} session={editor.session} initialField={editor.field} onClose={() => setEditor(null)} onSaved={saved} onReload={reload} />}{cancelling && <CancelDialog {...cancelling} onClose={() => setCancelling(null)} onSaved={saved} onReload={reload} />}</>;
 }
@@ -185,6 +184,7 @@ function SessionDialog({ data, date, session, initialField, onClose, onSaved, on
   const [draft, setDraft] = useState(initial);
   const [discard, setDiscard] = useState(false);
   const [reasonOpen, setReasonOpen] = useState(false);
+  const [closedDayReason, setClosedDayReason] = useState<string | null>(null);
   const [reloading, setReloading] = useState(false);
   const submittedDate = useRef(initial.date);
   const mutation = useMutation(onSaved);
@@ -213,12 +213,14 @@ function SessionDialog({ data, date, session, initialField, onClose, onSaved, on
     update('mode', mode);
     if (session) setBookings(items => mode === 'pair' && items.filter(b=>b.status!=='cancelled').length < 2 ? [...items, {studentId:'',status:'booked'}] : mode === 'one_to_one' ? items.filter(b => b.id) : items);
   };
-  const save = (reason = '') => {
+  const save = (reason = '', closedDayConfirmed = false) => {
     if (mutation.pending || mutation.uncertain || reloading || capacityError || (session && (!changed || !reason.trim()))) return;
+    if (isClosedDay(draft.date) && activeCount > 0 && !closedDayConfirmed) { setReasonOpen(false); setClosedDayReason(reason); return; }
+    setClosedDayReason(null);
     const body = session ? {date:draft.date,startTime:draft.startTime,durationMin:draft.durationMin,tutorId:draft.tutorId,roomId:draft.roomId,mode:draft.mode,note:draft.note,reason:reason.trim(),expectedVersion:session.version,bookings} : {...draft,reason:draft.reason?.trim(),studentIds:draft.studentIds.slice(0,draft.mode === 'pair' ? 2 : 1)};
     submittedDate.current = draft.date;
     setReasonOpen(false);
-    void mutation.submit(session ? `/api/sessions/${session.id}` : '/api/sessions', session ? 'PATCH' : 'POST', body);
+    void mutation.submit(session ? `/api/sessions/${session.id}` : '/api/sessions', session ? 'PATCH' : 'POST', {...body, closedDayConfirmed});
   };
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -267,7 +269,7 @@ function SessionDialog({ data, date, session, initialField, onClose, onSaved, on
     <div className="form-grid editor-notes editor-notes-single"><label>Reception note <span className="optional-label">Optional</span><textarea rows={2} maxLength={1000} value={draft.note} onChange={e => update('note',e.target.value)} />{fieldError('note')}</label></div>
     </fieldset>
 
-  </div><div className="modal-footer"><span className="draft-status" aria-live="polite">{session && changed ? 'Unsaved changes' : ''}</span><button type="button" className="button secondary" disabled={mutation.pending} onClick={close}>Cancel</button><button className="button primary" disabled={mutation.pending || mutation.uncertain || reloading || capacityError || (!!session && !changed)}>{mutation.pending ? 'Saving…' : session ? 'Save changes' : 'Create session'}<ArrowUpRight size={16} /></button></div></form></Dialog>{discard && <DiscardDialog onKeep={() => setDiscard(false)} onDiscard={onClose} />}{reasonOpen && <Dialog title="Reason for change" busy={false} onClose={() => setReasonOpen(false)}><form className="change-reason-form" onSubmit={e => { e.preventDefault(); if (!draft.reason?.trim()) { const input = e.currentTarget.querySelector('textarea'); input?.setCustomValidity('Enter a reason for this change.'); input?.reportValidity(); return; } save(draft.reason); }}><div className="modal-body"><p className="reason-intro">Add a short reason so the next person understands this change.</p><label className="field">Reason<textarea autoFocus required rows={3} maxLength={500} value={draft.reason} onChange={e => { e.target.setCustomValidity(''); update('reason', e.target.value); }} placeholder="For example, the family requested a different time." /></label></div><div className="modal-footer"><button type="button" className="button secondary" onClick={() => setReasonOpen(false)}>Back to editing</button><button className="button primary">Confirm changes<Check size={16} /></button></div></form></Dialog>}</>;
+  </div><div className="modal-footer"><span className="draft-status" aria-live="polite">{session && changed ? 'Unsaved changes' : ''}</span><button type="button" className="button secondary" disabled={mutation.pending} onClick={close}>Cancel</button><button className="button primary" disabled={mutation.pending || mutation.uncertain || reloading || capacityError || (!!session && !changed)}>{mutation.pending ? 'Saving…' : session ? 'Save changes' : 'Create session'}<ArrowUpRight size={16} /></button></div></form></Dialog>{discard && <DiscardDialog onKeep={() => setDiscard(false)} onDiscard={onClose} />}{reasonOpen && <Dialog title="Reason for change" busy={false} onClose={() => setReasonOpen(false)}><form className="change-reason-form" onSubmit={e => { e.preventDefault(); if (!draft.reason?.trim()) { const input = e.currentTarget.querySelector('textarea'); input?.setCustomValidity('Enter a reason for this change.'); input?.reportValidity(); return; } save(draft.reason); }}><div className="modal-body"><p className="reason-intro">Add a short reason so the next person understands this change.</p><label className="field">Reason<textarea autoFocus required rows={3} maxLength={500} value={draft.reason} onChange={e => { e.target.setCustomValidity(''); update('reason', e.target.value); }} placeholder="For example, the family requested a different time." /></label></div><div className="modal-footer"><button type="button" className="button secondary" onClick={() => setReasonOpen(false)}>Back to editing</button><button className="button primary">Confirm changes<Check size={16} /></button></div></form></Dialog>}{closedDayReason !== null && <Dialog title="Schedule on a closed day?" busy={mutation.pending} onClose={() => setClosedDayReason(null)}><div className="modal-body"><p>The centre is normally closed on Mondays. Do you want to schedule this lesson anyway?</p><p className="closed-day-summary"><strong>{formatDay(draft.date)}</strong><span>{draft.startTime}–{endTime(draft)} · Room {draft.roomId}</span></p><p className="form-hint">This exception will be recorded in History. Availability and tutor limits will still be checked.</p></div><div className="modal-footer"><button type="button" className="button secondary" onClick={() => setClosedDayReason(null)}>Back to editing</button><button type="button" className="button primary" disabled={mutation.pending} onClick={() => save(closedDayReason, true)}>Confirm and save</button></div></Dialog>}</>;
 }
 function CancelDialog({ session, booking, onClose, onSaved, onReload }: { session: Session; booking: Booking; onClose: () => void; onSaved: () => Promise<void>; onReload: (targetDate?: string) => Promise<boolean> }) {
   const [reason, setReason] = useState(''); const [discard, setDiscard] = useState(false); const [reloading, setReloading] = useState(false); const mutation = useMutation(onSaved); const remaining = session.bookings.filter(b => b.id !== booking.id && b.status !== 'cancelled');
