@@ -5,7 +5,7 @@
 
 This is the canonical master plan, based on Bao's supplied implementation plan and the subsequent review. It supersedes the previous execution checklist. Keep `DESIGN.md` (visual design) and `TECHNICAL_DESIGN.md` (business/technical design) aligned with this plan; document any proposed change rather than silently diverging. Repository safety instructions still apply.
 
-Status as of 2026-09-16: planning only. The repository is on `main` with initial commit `fd066be`; `AGENTS.md`, `DESIGN.md` (visual design) and `TECHNICAL_DESIGN.md` (business/technical design), this plan, and `ref/` are currently uncommitted. No application implementation or database verification has started. Approval to revise this plan is not approval to start coding, provision a database, run migrations, build, start a server, or commit.
+Status as of 2026-09-16: implemented MVP under active review. Local application history through `6d4dae6` includes the review fixes, protected rescheduling, atomic participant replacement, and compact conflict UI. Current verification and historical deployment evidence are separated in README; this file is not evidence that the latest code is deployed.
 
 ## 1. Goal and scope
 
@@ -20,7 +20,7 @@ Build **one feature: reception manages the daily schedule on a board, with const
 - Success: the app runs with the supplied seed, preserves historical violations, prevents invalid new scheduling writes, and Bao can explain the complete flow.
 - Main risks: treating intentional pairs as conflicts, blocking historical import, concurrent writes using stale data, and confusing an audit badge with notification delivery.
 
-Out of scope: catalog CRUD, recurring schedules, drag-and-drop, billing calculations, WhatsApp sending, login, Realtime, attendance workflows, restoring cancelled bookings, and additional administration tabs. Catalogs are predefined selection options. No generic rule engine, policy settings screen, or override button in v1.
+Out of scope: catalog CRUD, recurring schedules, drag-and-drop, billing calculations, WhatsApp sending, login, Realtime, a separate attendance workflow, and additional administration tabs. Catalogs are predefined selection options. No generic rule engine, policy settings screen, or override button in v1.
 
 ### Timebox
 
@@ -85,7 +85,7 @@ Stack: Next.js App Router, TypeScript, Tailwind, Zod, `postgres`/Postgres.js, Vi
 
 Use a dedicated Supabase assignment project, never an existing product database. No suitable target or live connection has been verified in this documentation stage. Confirm the project and authorization before provisioning or applying schema changes. Keep the connection string server-only in ignored `.env.local`; provide `.env.example` placeholders.
 
-This is a local assessment application. Put PostgreSQL tables in a private schema excluded from Data API exposure and verify actual grants/exposure during setup. Never send secrets to the browser. Public deployment and auth are out of scope.
+This is an approved public synthetic-data demonstration hosted on Vercel with dedicated Supabase PostgreSQL. Tables use a private schema excluded from Data API exposure; runtime credentials remain server-only. Login is intentionally omitted. Live deployment does not imply the latest local changes are deployed.
 
 ### Data model
 
@@ -138,10 +138,28 @@ The PDF's custom font corrupts extracted text; read its rendered pages. Both pag
 | --- | --- |
 | GET /api/schedule?date=YYYY-MM-DD | Daily sessions/bookings, selection catalogs, warnings, relevant changes, demo clock, timezone |
 | POST /api/sessions | Create a session with one/two students atomically |
-| PATCH /api/sessions/:id | Edit date/time, duration, tutor, room; require expectedVersion and reason |
+| PATCH /api/sessions/:id | Edit schedule, note, mode and booking statuses; existing booking student identity is immutable; require expectedVersion and reason |
 | POST /api/bookings/:id/cancel | Cancel one student's booking; require its session's expectedVersion and reason |
 
-Do not change an existing session's student roster in v1. Read `no_show` from seed; no attendance workflow. Define shared typed request/response/error contracts before independent UI/domain work. Creation records a supplied reason when present; edit/cancellation reasons are mandatory.
+### Editor policy and status transitions
+
+Existing booking IDs retain their original student and source metadata. Directly overwriting studentId is rejected with `BOOKING_IDENTITY`. The editor sends replacementStudentId on the old booking to replace its participant atomically: cancel the old booking, retain its source metadata and cancellation history, and insert a fresh booked record without inherited source or cancellation fields. An ordinary booked session may add one new distinct student when converting to a pair. Existing bookings cannot be removed; cancelled history is retained. One-to-one permits at most one active booking; pair allows up to two active bookings and retains any cancelled history separately.
+
+The edit endpoint accepts date, startTime, durationMin, tutorId, roomId, optional mode/note/bookings, expectedVersion, and a required reason. Each booking edit contains an existing id (or no id for a new second booking), studentId, and status, with optional replacementStudentId. All supplied existing IDs must belong to the session and all stored bookings must remain represented.
+
+| Stored state / operation | Result |
+| --- | --- |
+| Any no-show or all bookings cancelled; change date/time/duration/tutor/room/mode | Reject `SESSION_NOT_EDITABLE`, even when the same request changes status or includes bookings |
+| Same protected session; update note or cancel booking without moving | Allowed; source identity and snapshots are retained |
+| Booked -> no_show | Resource-consuming status correction; validate the resulting schedule |
+| Booked/no_show -> cancelled | Release only that student's occupancy; cancellation alone remains possible on historical conflicts |
+| Cancelled -> booked/no_show, or no_show -> booked | Same student only; revalidate the complete affected session, set cancelledAt to null, record reason and before/after audit |
+| Restore and move a protected session in one request | Rejected; a successful status correction must be saved separately before a later reschedule |
+| Directly change an existing booking's studentId | Rejected; use replacementStudentId instead |
+| Replace a participant | Cancel the old booking and insert a fresh booked participant in the same transaction; validate occupancy and tutor load before either change commits |
+
+These are manual booking-status corrections within the scheduling editor, not a separate attendance workflow. Source notes remain attached to the same student. Previous cancellation timestamps/reasons remain available in audit snapshots after a valid restoration. Server checks run under the existing transaction lock after the version check; UI locks are explanatory, not authorization.
+
 
 ### Single write path
 
@@ -163,7 +181,7 @@ API errors: 400 for invalid input, 404 for missing entities, 409 for business co
 - **Explicit limitation:** if T1 still has seven active bookings that day, changing only one session's room is rejected because its resulting tutor-day load remains invalid. Explain this in the error. Moving it to a valid tutor/day or cancelling a booking can resolve the load.
 - “Allow any edit that does not worsen a violation” is deferred; it requires additional comparison rules and tests. Do not implement it implicitly.
 - Cancellation remains allowed when historical scheduling rules are violated.
-- Do not reschedule a fully cancelled session or one containing `no_show`; no restoration workflow.
+- Do not reschedule a fully cancelled session or one containing `no_show`, based on stored state. A separate status correction may restore occupancy only after validation.
 
 ### Cutoff and change visibility
 
@@ -177,7 +195,7 @@ Reject a bulk-save-whole-table endpoint: it makes per-operation errors harder to
 
 ## 5. Delegation and integration order
 
-Implementation remains gated on Bao's instruction to proceed. During implementation, the coordinator owns scaffold, dependencies, schema/seed, shared contracts, API/transactions, integration, documentation, and authorized commits. Subagents must not modify contracts, package files, migrations, or Git history.
+Bao authorized implementation; the following ownership boundaries continue to apply. During implementation, the coordinator owns scaffold, dependencies, schema/seed, shared contracts, API/transactions, integration, documentation, and authorized commits. Subagents must not modify contracts, package files, migrations, or Git history.
 
 | Agent | Independent responsibility | Deliverable |
 | --- | --- | --- |
@@ -209,7 +227,7 @@ Use any actual remaining slack as buffer, not additional feature scope. If DB ac
 - Student, tutor, and room overlaps are blocked; adjacent sessions are allowed.
 - Sixth active student booking allowed, seventh rejected; pair counts two; cancelled excluded.
 - Monday, unsupported duration, and out-of-hours sessions blocked; exact opening boundaries covered.
-- Pair requires distinct students; one-to-one exactly one; existing roster cannot change.
+- Pair requires distinct students; one-to-one exactly one; existing booking identity cannot change; adding a distinct second booking for a pair is supported.
 - Last cancellation releases shared resources; first pair cancellation does not; no-show remains resource-consuming.
 - Cancellation works on invalid historical data; room-only edit on a still-overloaded tutor-day is rejected with a clear reason.
 - Fully cancelled/no-show sessions cannot be rescheduled; repeated cancellation does not duplicate history.
@@ -249,10 +267,13 @@ Before handoff, explain two paths to Bao:
 - [x] Confirm dedicated Bright Path project and isolated bright_path_test schema.
 - [x] Complete foundation and shared contracts.
 - [x] Implement domain, database/API, and UI workstreams.
-- [x] Integrate: typecheck, 27 domain tests, 7 real PostgreSQL tests, production deployment.
+- [x] Original implementation checkpoint: typecheck, 27 domain tests, 7 PostgreSQL tests and initial deployment. These historical results do not cover later edits; see README for the latest review checks.
 - [x] Review and finish handoff documents; create/cancel paths are documented and explained in the handoff.
-- [ ] Commit locally if authorized; push/submit only upon request.
+- [x] Local functional commits through `6d4dae6`; push/submit only upon request.
 
 ## Deployment checkpoint
 
-Live public demo: https://bright-path-scheduling.vercel.app. Runtime DATABASE_URL was explicitly approved as a Vercel Production Secret; owner/test credentials remain local. No Git commit or push has been made. Final browser and seed-rerun evidence is recorded in README.
+Live public demo: https://bright-path-scheduling.vercel.app. Runtime DATABASE_URL was explicitly approved as a Vercel Production Secret; owner/test credentials remain local. Local application commits now exist through `6d4dae6`. No push or deployment of the current review fixes was performed in this task. The original CLI deployment was made from an uncommitted working tree; its exact commit cannot be established from the available evidence. Do not label it as deployment of HEAD. Historical browser and seed-rerun evidence is recorded separately in README.
+
+
+Participant replacement (approved 16 September 2026): reception can select a new student in the same session. The request retains the old studentId/id and supplies replacementStudentId. The old booking is cancelled (an existing cancellation timestamp/reason is preserved), a new booking is created, and the session version plus before/after audit are committed atomically. Schedule and peer bookings are unchanged unless separately edited. A conflicting replacement or stale version writes nothing. A student who already has a retained booking in that session must use their existing booking's status correction instead, avoiding duplicate identity. The main board and filters use active participants where present; cancelled participants remain accessible in session details, the collapsed editor history and audit. No record is deleted.

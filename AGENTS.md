@@ -5,7 +5,7 @@
 
 ## Current stage and source of truth
 
-This repository is in pre-implementation planning. Reference acquisition and documentation are authorized; application implementation must wait for Bao's approval of the plan. Do not scaffold, install dependencies, provision a database, run migrations, build, or start a server merely because these documents describe future work.
+This repository contains the implemented MVP under review. Bao has authorized implementation and fixes. Build, server startup, migrations, commits, and deployment still require their applicable explicit authorization; descriptions of future work do not grant it.
 
 Read, in order:
 
@@ -27,7 +27,7 @@ The source brief describes the assignment; the design labels our interpretations
 - Preserve historical violations and show warnings. New scheduling writes must validate the affected session; cancellation remains possible on invalid historical data.
 - Use one transaction path for all schedule writes, with the same transaction-scoped advisory lock, current-state validation, version checks, and atomic audit records.
 - Use the fixed demo clock and timezone from `DESIGN.md` (visual design) and `TECHNICAL_DESIGN.md` (business/technical design). Never let the viewed date change the clock.
-- No catalog CRUD, recurring schedules, drag-and-drop, billing implementation, WhatsApp sending, login, Realtime, attendance workflow, or extra administration tabs.
+- No catalog CRUD, recurring schedules, drag-and-drop, billing implementation, WhatsApp sending, login, Realtime, a separate attendance workflow, or extra administration tabs.
 
 ## Database and secrets
 

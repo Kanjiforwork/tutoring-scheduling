@@ -3,13 +3,13 @@
 > Current authorization (2026-09-16): Bao approved implementation with Astra medium agents, a dedicated Supabase database, and Vercel hosting. This is a public synthetic-data demo with no login, explicitly requested by Bao; anyone with the link can change demo schedules. Earlier planning-only/local-only statements below describe the previous stage and are superseded by this authorization. No real student data or product database is used. The runtime connection secret requires the separate deployment approval recorded in the task.
 
 
-Status: proposed design before application implementation. Prepared on 2026-09-16. Nothing here is a claim of implemented or tested behavior.
+Status: implemented design, updated during the 2026-09-16 review. README separates current verification from historical deployment evidence.
 
 ## 1. Evidence and problem
 
 Sources: the visually reviewed two-page `ref/01-tutoring-scheduling.pdf`, `ref/README.txt`, and both CSV files. The PDF's extracted text is corrupted by its font; rendered pages are authoritative.
 
-Bright Path is a tutoring centre in Da Nang with 12 tutors, fewer than 200 families, and six rooms. Mai operates a shared spreadsheet and WhatsApp groups and will go on leave in three weeks. Student double-booking is unacceptable. Tutors receive competing versions of their day and sometimes travel to cancelled lessons. The owner wants an immediate view of today.
+Bright Path is a tutoring centre in Da Nang with 12 tutors, fewer than 200 families, and six rooms. Mai operates a shared spreadsheet and WhatsApp groups and will go on leave in eight weeks. Student double-booking is unacceptable. Tutors receive competing versions of their day and sometimes travel to cancelled lessons. The owner wants an immediate view of today.
 
 The README says this is a tidied export taken on 2026-03-10: every row parses and every identifier resolves, but actual operations do not always satisfy the rules. These are historical business violations, not corrupt input to repair.
 
@@ -54,7 +54,7 @@ Use half-open intervals `[start, end)` so an end at 10:00 permits a start at 10:
 - Initial viewed date: `2026-03-04`, intentionally tomorrow to show the known student conflict and pair immediately. This differs from a literal today-first landing page; Today returns to March 3 using the demo clock.
 - Display the demo clock separately from the selected date. Never use the host's real date for scheduling decisions.
 - This clock is an assessment device, not an as-of historical reconstruction: the March 10 export includes later statuses and cancellations. Preserve them without pretending they were known on March 3.
-- No blanket past-session restriction is introduced in v1. Disallow edits to fully cancelled sessions or sessions containing a no-show; do not add attendance or restoration workflows.
+- No blanket past-session restriction is introduced in v1. Disallow scheduling-field changes to fully cancelled sessions or sessions containing a no-show, based on stored state. Permit note updates and separate status corrections under the editor policy below.
 
 Verified source inventory: 34 bookings, 3 tutors, 6 distinct student names, dates March 3-10. Pairing only L009/L010 yields 33 sessions. Keep original lesson IDs and notes.
 
@@ -79,7 +79,7 @@ One English-language screen, built for a busy receptionist on a laptop. Use a co
 3. Daily table: Time, Students, Tutor, Room, Status, Warnings, Actions. Sort by start time with a stable secondary ID.
 4. One row per session. Pair students appear together with individual status and cancellation controls. Keep historical and cancelled records visible.
 5. Expand warning details to identify the conflicting session, lesson ID, time, and resource. Filtering must not suppress conflict detection; warn even when the other record is hidden by a filter.
-6. Create/edit form: date, start, duration (60/90), tutor, room; create additionally chooses one-to-one/pair and students. Edit cannot change the roster. Explain that a pair edit affects both students; require an edit reason.
+6. Create/edit form: date, start, duration (60/90), tutor, room; create additionally chooses one-to-one/pair and students. Edit preserves existing booking/student identity, supports a new second booking for pair conversion, and permits audited status corrections. Explain that a pair edit affects both students; require an edit reason.
 7. Cancellation confirmation: name the student and session, require a reason, explain whether the other student keeps the room/tutor occupied.
 8. Change details: action, reason, demo timestamp, before/after values, and After cutoff badge. Clearly state that the badge is not a notification receipt.
 
@@ -106,7 +106,7 @@ Store instants consistently and derive dates/cutoffs in the centre timezone. Sna
 
 Database constraints: primary/foreign keys, required fields, permitted statuses/modes, positive version, 60/90-minute duration, unique `(session_id, student_id)`, unique source lesson IDs. Application transaction checks: opening day/hours, active overlap, daily load, pair cardinality at creation, edit eligibility, version, and audit policy. Do not impose whole-table overlap/day/load constraints that reject the required historical seed.
 
-Use a private schema excluded from Data API exposure, server-only `.env.local`, and `.env.example` placeholders. Verify grants/exposure during setup. Without login, this app is a local assessment only; public deployment is out of scope. No project or database connection has been verified in this documentation phase.
+Use a private schema excluded from Data API exposure, server-only `.env.local`, and `.env.example` placeholders. Verify grants/exposure during setup. Public no-login hosting of this synthetic demo was explicitly approved. Latest local changes are not automatically deployed; see README for verification boundaries.
 
 ## 7. API contract outline
 
@@ -114,7 +114,7 @@ Use a private schema excluded from Data API exposure, server-only `.env.local`, 
 | --- | --- |
 | GET /api/schedule?date=YYYY-MM-DD | Sessions and per-student bookings, catalogs, related warnings, relevant change history, demo clock and timezone |
 | POST /api/sessions | Date, local start, duration, tutorId, roomId, mode, studentIds; atomic creation; record reason if provided |
-| PATCH /api/sessions/:id | Editable scheduling fields, expectedVersion, required reason; whole-session edit |
+| PATCH /api/sessions/:id | Schedule fields, optional mode/note/bookings, expectedVersion, required reason; immutable existing booking/student identity |
 | POST /api/bookings/:id/cancel | Session expectedVersion and required reason; cancel one booking |
 
 Writes return committed identifiers/version. Final DTOs are a prerequisite for parallel implementation. Errors use an envelope containing code, message, optional field errors, and related session/booking/source IDs. Use 400 for malformed input, 404 for missing entities, 409 for business conflicts or stale versions, and a sanitized server error for unexpected failure. Never return SQL or secrets.
@@ -144,3 +144,25 @@ Create: receptionist fills form -> UI preserves draft while submitting -> API va
 Cancel: receptionist selects one student's booking and gives a reason -> API locks and checks session version -> booking becomes cancelled, version increases, audit records before/after -> UI refreshes. The tutor and room are released only if no active booking remains. Stale version and already-cancelled state return clear conflicts; historical scheduling violations do not block cancellation.
 
 Known limits: no authentication, notification acknowledgement, billing, recurrence, undo, automatic source-data repair, or protection against direct SQL bypass. Global serialization trades throughput for explainability. Assess these honestly in `DECISIONS.md` after implementation, using actual evidence rather than predicted success.
+
+### Editor policy and status transitions
+
+Existing booking IDs retain their original student and source metadata. Directly overwriting studentId is rejected with `BOOKING_IDENTITY`. The editor sends replacementStudentId on the old booking to replace its participant atomically: cancel the old booking, retain its source metadata and cancellation history, and insert a fresh booked record without inherited source or cancellation fields. An ordinary booked session may add one new distinct student when converting to a pair. Existing bookings cannot be removed; cancelled history is retained. One-to-one permits at most one active booking; pair allows up to two active bookings and retains any cancelled history separately.
+
+The edit endpoint accepts date, startTime, durationMin, tutorId, roomId, optional mode/note/bookings, expectedVersion, and a required reason. Each booking edit contains an existing id (or no id for a new second booking), studentId, and status, with optional replacementStudentId. All supplied existing IDs must belong to the session and all stored bookings must remain represented.
+
+| Stored state / operation | Result |
+| --- | --- |
+| Any no-show or all bookings cancelled; change date/time/duration/tutor/room/mode | Reject `SESSION_NOT_EDITABLE`, even when the same request changes status or includes bookings |
+| Same protected session; update note or cancel booking without moving | Allowed; source identity and snapshots are retained |
+| Booked -> no_show | Resource-consuming status correction; validate the resulting schedule |
+| Booked/no_show -> cancelled | Release only that student's occupancy; cancellation alone remains possible on historical conflicts |
+| Cancelled -> booked/no_show, or no_show -> booked | Same student only; revalidate the complete affected session, set cancelledAt to null, record reason and before/after audit |
+| Restore and move a protected session in one request | Rejected; a successful status correction must be saved separately before a later reschedule |
+| Directly change an existing booking's studentId | Rejected; use replacementStudentId instead |
+| Replace a participant | Cancel the old booking and insert a fresh booked participant in the same transaction; validate occupancy and tutor load before either change commits |
+
+These are manual booking-status corrections within the scheduling editor, not a separate attendance workflow. Source notes remain attached to the same student. Previous cancellation timestamps/reasons remain available in audit snapshots after a valid restoration. Server checks run under the existing transaction lock after the version check; UI locks are explanatory, not authorization.
+
+
+Participant replacement (approved 16 September 2026): reception can select a new student in the same session. The request retains the old studentId/id and supplies replacementStudentId. The old booking is cancelled (an existing cancellation timestamp/reason is preserved), a new booking is created, and the session version plus before/after audit are committed atomically. Schedule and peer bookings are unchanged unless separately edited. A conflicting replacement or stale version writes nothing. A student who already has a retained booking in that session must use their existing booking's status correction instead, avoiding duplicate identity. The main board and filters use active participants where present; cancelled participants remain accessible in session details, the collapsed editor history and audit. No record is deleted.

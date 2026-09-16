@@ -191,7 +191,7 @@ A pair marker is informational, not a warning. Do not offer an Override button u
 
 Use a dialog approximately 560-640px wide on desktop. Labels stay above controls. Date/time and tutor/room may share two-column rows where space allows; collapse to one column on phones. Never use placeholder text as the only label.
 
-Creation fields: date, start time, duration, tutor, room, one-to-one/pair choice, and student selection. Pair requires two clearly labeled student selections. Duration uses explicit 60 min / 90 min choices. Editing preserves the student roster and visibly states how many students are affected. Place the reason field near the bottom for edits.
+Creation fields: date, start time, duration, tutor, room, one-to-one/pair choice, and student selection. Pair requires two clearly labeled student selections. Duration uses explicit 60 min / 90 min choices. Editing allows selecting a replacement student: show a short before/after hint, then cancel the original booking and create the new one atomically on save. A new second booking can also be selected when converting to a pair. Status corrections are audited and checked on the server. Scheduling fields are disabled while the stored session has a no-show or all bookings are cancelled. Ask for the change reason in a secondary dialog after Save changes.
 
 Put field errors directly below the field. Put cross-field conflicts in a compact error summary with related session details. Keep all entered values after rejection. Keep an obvious Close/Cancel route and warn before discarding a changed draft. Do not dismiss a dirty form through an accidental backdrop click.
 
